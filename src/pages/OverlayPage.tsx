@@ -251,6 +251,17 @@ function OverlayPage() {
   useEffect(() => {
     // Focus the overlay to receive keyboard events
     overlayRef.current?.focus();
+
+    // Also ensure window has focus (important for Windows)
+    const ensureFocus = async () => {
+      try {
+        const win = getCurrentWindow();
+        await win.setFocus();
+      } catch (e) {
+        console.error("Failed to set window focus:", e);
+      }
+    };
+    ensureFocus();
   }, []);
 
   return (

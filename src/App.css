@@ -210,7 +210,10 @@ button.danger:hover:not(:disabled) {
   height: 100vh;
   cursor: crosshair;
   user-select: none;
+  /* On Windows, window is not transparent, so canvas covers everything */
+  /* On macOS/Linux, window is transparent */
   background: transparent;
+  overflow: hidden;
 }
 
 .overlay-canvas {
@@ -241,7 +244,8 @@ button.danger:hover:not(:disabled) {
   transform: translateX(-50%);
   display: flex;
   gap: 10px;
-  z-index: 10;
+  z-index: 9999;
+  pointer-events: auto;
 }
 
 .overlay-btn {
@@ -254,6 +258,8 @@ button.danger:hover:not(:disabled) {
   align-items: center;
   gap: 6px;
   transition: opacity 0.2s;
+  pointer-events: auto;
+  z-index: 9999;
 }
 
 .overlay-btn:hover {

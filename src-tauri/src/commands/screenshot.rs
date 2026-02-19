@@ -588,16 +588,32 @@ fn create_overlay_window(app: &AppHandle, _offset_x: i32, _offset_y: i32, _total
     println!("  Bounding box: min=({}, {}), max=({}, {})", min_x, min_y, max_x, max_y);
     println!("  Overlay window: {}x{} at ({}, {})", logical_width, logical_height, logical_x, logical_y);
 
-    WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("index.html#/overlay".into()))
+    // On Windows, transparent windows don't receive input events properly
+    // So we create a non-transparent window and use the screenshot as background
+    #[cfg(target_os = "windows")]
+    let use_transparent = false;
+    #[cfg(not(target_os = "windows"))]
+    let use_transparent = true;
+
+    let mut builder = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("index.html#/overlay".into()))
         .title("")
         .inner_size(logical_width, logical_height)
         .position(logical_x, logical_y)
         .decorations(false)
-        .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
-        .visible_on_all_workspaces(true)
-        .build()
+        .focused(true);
+
+    if use_transparent {
+        builder = builder.transparent(true);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        builder = builder.visible_on_all_workspaces(true);
+    }
+
+    builder.build()
         .map_err(|e| format!("Failed to create overlay: {}", e))?;
 
     Ok(())
