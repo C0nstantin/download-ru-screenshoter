@@ -1,5 +1,4 @@
 use reqwest::multipart;
-use sha1::{Sha1, Digest};
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
@@ -186,6 +185,75 @@ struct FileObject {
     shared: bool,
 }
 
+#[derive(serde::Deserialize)]
+struct FolderListResponse {
+    object: FolderContents,
+}
+
+#[derive(serde::Deserialize)]
+struct FolderContents {
+    folders: Vec<FolderItem>,
+}
+
+#[derive(serde::Deserialize)]
+struct FolderItem {
+    id: String,
+    name: String,
+}
+
+#[derive(serde::Deserialize)]
+struct CreateFolderResponse {
+    object: FolderItem,
+}
+
+/// Get or create .screenshots folder, return its id
+async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str) -> Result<String, String> {
+    // List root folders
+    let resp = client
+        .get("https://download.ru/folders.json")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to list folders: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Failed to list folders: {}", resp.status()));
+    }
+
+    let folder_list: FolderListResponse = resp.json().await
+        .map_err(|e| format!("Failed to parse folders: {}", e))?;
+
+    // Look for .screenshots
+    if let Some(f) = folder_list.object.folders.iter().find(|f| f.name == ".screenshots") {
+        println!("Found .screenshots folder: {}", f.id);
+        return Ok(f.id.clone());
+    }
+
+    // Create .screenshots folder
+    println!("Creating .screenshots folder...");
+    let resp = client
+        .post("https://download.ru/folders.json")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/json")
+        .form(&[("folder[name]", ".screenshots")])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create folder: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Failed to create folder {}: {}", status, body));
+    }
+
+    let created: CreateFolderResponse = resp.json().await
+        .map_err(|e| format!("Failed to parse create folder response: {}", e))?;
+
+    println!("Created .screenshots folder: {}", created.object.id);
+    Ok(created.object.id)
+}
+
 /// Upload screenshot to download.ru
 #[tauri::command]
 pub async fn upload_to_download(
@@ -195,7 +263,6 @@ pub async fn upload_to_download(
 ) -> Result<UploadResponse, String> {
     // Get image bytes
     let png_bytes = if let Some(data) = image_data {
-        // Decode base64 (remove data URL prefix if present)
         let base64_data = if data.contains(",") {
             data.split(",").last().unwrap_or(&data)
         } else {
@@ -211,55 +278,50 @@ pub async fn upload_to_download(
     // Get access token
     let token = {
         let token = state.access_token.lock().unwrap();
-        token.clone().ok_or("No access token set. Please configure in settings.")?
+        token.clone().ok_or("No access token. Please login in settings.")?
     };
 
-    // Calculate SHA1 and CRC32
-    let mut hasher = Sha1::new();
-    hasher.update(&png_bytes);
-    let sha1_result = hasher.finalize();
-    let sha1_hex = format!("{:x}", sha1_result);
+    println!("Uploading: {} ({} bytes)", filename, png_bytes.len());
 
-    let crc32_value = crc32fast::hash(&png_bytes);
+    let client = reqwest::Client::new();
 
-    let file_size = png_bytes.len();
+    // Get or create .screenshots folder
+    let parent_id = get_or_create_screenshots_folder(&client, &token).await?;
 
-    // Create multipart form
+    // Create multipart form - field name "files[]" as browser does
     let file_part = multipart::Part::bytes(png_bytes)
         .file_name(filename.clone())
         .mime_str("image/png")
         .map_err(|e| format!("Failed to create form part: {}", e))?;
 
     let form = multipart::Form::new()
-        .part("file[data]", file_part)
-        .text("file[data][original_filename]", filename.clone())
-        .text("file[data][sha1]", sha1_hex)
-        .text("file[data][size]", file_size.to_string())
-        .text("file[data][crc32]", crc32_value.to_string())
-        .text("file[shared]", "true");
+        .part("files[]", file_part);
 
-    // Send request
-    let client = reqwest::Client::new();
+    // POST /fast_upload?parent_id=<id>
+    let url = format!("https://download.ru/fast_upload?parent_id={}", parent_id);
+    println!("POST {}", url);
+
     let response = client
-        .post("https://download.ru/fast_upload")
+        .post(&url)
         .header("Authorization", format!("Bearer {}", token))
-        .header("X-Content-Type", "image/png")
+        .header("Accept", "application/json")
+        .header("X-Requested-With", "XMLHttpRequest")
         .header("User-Agent", "DownloadScreenshoter/1.0")
         .multipart(form)
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    println!("Upload response {}: {}", status, &body[..body.len().min(500)]);
+
+    if !status.is_success() {
         return Err(format!("Upload failed with status {}: {}", status, body));
     }
 
-    let api_response: ApiResponse = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    let api_response: ApiResponse = serde_json::from_str(&body)
+        .map_err(|e| format!("Failed to parse response: {} | body: {}", e, &body[..body.len().min(300)]))?;
 
     Ok(UploadResponse {
         id: api_response.object.id,
