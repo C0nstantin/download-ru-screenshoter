@@ -20,7 +20,11 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
             .spawn()
             .map_err(|e| format!("Failed to start screencapture: {}", e))?;
 
-        // Store path for the result window
+        // Store PID so stop_video_recording can kill the process
+        {
+            let mut pid = state.recording_pid.lock().unwrap();
+            *pid = Some(child.id());
+        }
         {
             let mut path = state.recording_path.lock().unwrap();
             *path = Some(output_path.clone());
@@ -33,6 +37,9 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
         // Monitor process in background — when screencapture exits, show result
         let app_clone = app.clone();
         let recording_path = output_path.clone();
+        // Show our Stop button while recording
+        show_recording_window(&app)?;
+
         // Monitor process in background — show result window when screencapture exits
         std::thread::spawn(move || {
             let _ = child.wait();
@@ -40,6 +47,7 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
 
             let state = app_clone.state::<AppState>();
 
+            { let mut p = state.recording_pid.lock().unwrap(); *p = None; }
             { let mut p = state.recording_path.lock().unwrap(); *p = None; }
 
             if std::fs::metadata(&recording_path).is_ok() {
@@ -124,18 +132,13 @@ pub fn stop_video_recording(
         p.clone().ok_or("No recording in progress")?
     };
 
-    // Send SIGINT to screencapture so it finalizes the file
+    // Send SIGINT to screencapture via stored PID
     {
-        let mut proc = state.recording_process.lock().unwrap();
-        if let Some(child) = proc.as_ref() {
-            let pid = child.id().to_string();
+        let mut pid_guard = state.recording_pid.lock().unwrap();
+        if let Some(pid) = pid_guard.take() {
             let _ = std::process::Command::new("kill")
-                .args(["-2", &pid])
+                .args(["-2", &pid.to_string()])
                 .status();
-        }
-        // Wait for process to exit so file is finalized
-        if let Some(mut child) = proc.take() {
-            let _ = child.wait();
         }
     }
 
