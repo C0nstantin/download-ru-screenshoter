@@ -168,6 +168,10 @@ pub fn open_editor(app: AppHandle, state: State<'_, AppState>) -> Result<(), Str
     };
 
     println!("Creating editor with dimensions: {}x{}", dims.0, dims.1);
+
+    // Small delay to ensure state is fully updated
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
     create_editor_window(&app, dims.0, dims.1)
 }
 
