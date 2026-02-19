@@ -1,6 +1,5 @@
 use reqwest::multipart;
-use tauri::{AppHandle, State};
-use tauri_plugin_opener::OpenerExt;
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
@@ -21,23 +20,181 @@ struct TokenResponse {
     expires_in: Option<u64>,
 }
 
-/// Open browser to OAuth authorization page
+/// Open internal webview for OAuth — intercepts redirect with code automatically
 #[tauri::command]
-pub fn open_oauth_browser(app: AppHandle) -> Result<(), String> {
+pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // URL-encode the redirect_uri value in the query string
+    let encoded_redirect = REDIRECT_URI
+        .replace(':', "%3A")
+        .replace('/', "%2F");
     let url = format!(
         "https://download.ru/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=",
-        CLIENT_ID, REDIRECT_URI
+        CLIENT_ID, encoded_redirect
     );
-    app.opener().open_url(&url, None::<&str>)
-        .map_err(|e| format!("Failed to open browser: {}", e))
+
+    let app_clone = app.clone();
+    let token_arc = state.access_token.clone();
+    // Flag to prevent processing the same code twice (init_script + polling race)
+    let code_captured = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let code_captured_close = std::sync::Arc::clone(&code_captured);
+
+    // Only capture code= from URL params on page load (safe, no false positives).
+    // Full page scan is done by Rust-side polling via eval() after user clicks Allow.
+    let init_script = r#"
+        (function() {
+            var params = new URLSearchParams(window.location.search);
+            var code = params.get('code');
+            if (code) {
+                window.location = 'oauth-capture://code?code=' + encodeURIComponent(code);
+            }
+        })();
+    "#;
+
+    let win = tauri::WebviewWindowBuilder::new(
+        &app,
+        "oauth",
+        tauri::WebviewUrl::External(url.parse().map_err(|e| format!("URL error: {}", e))?),
+    )
+    .title("Авторизация download.ru")
+    .inner_size(900.0, 650.0)
+    .initialization_script(init_script)
+    .on_navigation(move |nav_url| {
+        let code_captured_nav = code_captured.clone();
+        let code_captured_poll = code_captured.clone();
+        let url_str = nav_url.as_str();
+        println!("OAuth nav: {}", url_str);
+
+        // Catch our custom scheme (triggered by init_script or polling eval)
+        if url_str.starts_with("oauth-capture://") {
+            // Atomically set captured flag — only process once
+            if code_captured_nav.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return false; // already captured, ignore duplicate
+            }
+
+            let code = url_str
+                .split('?').nth(1)
+                .and_then(|q| q.split('&').find_map(|p| {
+                    let mut kv = p.splitn(2, '=');
+                    if kv.next()? == "code" {
+                        kv.next().map(|v| urlencoding_decode(v))
+                    } else { None }
+                }));
+
+            if let Some(code) = code {
+                let app2 = app_clone.clone();
+                let token_arc2 = token_arc.clone();
+                tauri::async_runtime::spawn(async move {
+                    match exchange_code_internal(code, &app2, token_arc2).await {
+                        Ok(_) => { let _ = app2.emit("oauth-complete", true); }
+                        Err(e) => {
+                            eprintln!("OAuth error: {}", e);
+                            let _ = app2.emit("oauth-complete", false);
+                        }
+                    }
+                    if let Some(w) = app2.get_webview_window("oauth") {
+                        let _ = w.close().ok();
+                    }
+                });
+            }
+            return false;
+        }
+
+        // When user reaches the oauth/authorize page — start polling for the code
+        // after user clicks Allow. Polls every 1s for up to 90s.
+        if url_str.contains("download.ru/oauth/authorize") {
+            let app2 = app_clone.clone();
+            let captured2 = code_captured_poll.clone();
+            tauri::async_runtime::spawn(async move {
+                // Wait a bit for page to fully load
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
+                // JS: only capture code from specific "code display" elements,
+                // NOT from form fields or general HTML (avoids false positives).
+                let check_js = r#"
+                    (function() {
+                        var code = null;
+                        // 1. URL param (safest)
+                        var p = new URLSearchParams(window.location.search);
+                        code = p.get('code');
+                        // 2. <code> or <pre> tag containing exactly a 64-char hex (OOB display)
+                        if (!code) {
+                            var els = document.querySelectorAll('code, pre, .oauth-code, [class*="auth-code"], [class*="access-code"]');
+                            for (var i = 0; i < els.length; i++) {
+                                var t = (els[i].textContent || '').trim();
+                                if (/^[0-9a-f]{64}$/i.test(t)) { code = t; break; }
+                            }
+                        }
+                        // 3. read-only text input (common for OOB display)
+                        if (!code) {
+                            var inputs = document.querySelectorAll('input[readonly], input[type="text"][disabled]');
+                            for (var i = 0; i < inputs.length; i++) {
+                                var v = inputs[i].value || '';
+                                if (/^[0-9a-f]{64}$/i.test(v)) { code = v; break; }
+                            }
+                        }
+                        if (code) {
+                            window.location = 'oauth-capture://code?code=' + encodeURIComponent(code);
+                        }
+                    })();
+                "#;
+
+                for _ in 0..90u32 {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    // Stop if code was already captured (by init_script or previous poll)
+                    if captured2.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+                    if let Some(w) = app2.get_webview_window("oauth") {
+                        let _ = w.eval(check_js);
+                    } else {
+                        break;
+                    }
+                }
+            });
+        }
+
+        true
+    })
+    .build()
+    .map_err(|e| format!("Failed to open auth window: {}", e))?;
+
+    // Only emit false if user closed manually WITHOUT completing auth
+    let app_for_close = app.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if !code_captured_close.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = app_for_close.emit("oauth-complete", false);
+            }
+        }
+    });
+
+    Ok(())
 }
 
-/// Exchange OAuth code for access token
-#[tauri::command]
-pub async fn exchange_oauth_code(
+fn urlencoding_decode(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let h1 = chars.next().unwrap_or(b'0');
+            let h2 = chars.next().unwrap_or(b'0');
+            let hex = format!("{}{}", h1 as char, h2 as char);
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                result.push(byte as char);
+            }
+        } else if b == b'+' {
+            result.push(' ');
+        } else {
+            result.push(b as char);
+        }
+    }
+    result
+}
+
+async fn exchange_code_internal(
     code: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
+    app: &AppHandle,
+    token_arc: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
     let response = client
@@ -64,7 +221,6 @@ pub async fn exchange_oauth_code(
         .await
         .map_err(|e| format!("Failed to parse token response: {}", e))?;
 
-    // Save tokens to store
     let store = app.store(STORE_FILE)
         .map_err(|e| format!("Failed to open store: {}", e))?;
     store.set("access_token", serde_json::json!(token_resp.access_token.clone()));
@@ -73,10 +229,10 @@ pub async fn exchange_oauth_code(
     }
     store.save().map_err(|e| format!("Failed to save store: {}", e))?;
 
-    // Update in-memory state
-    let mut access_token = state.access_token.lock().unwrap();
+    let mut access_token = token_arc.lock().unwrap();
     *access_token = Some(token_resp.access_token);
 
+    println!("OAuth: token saved successfully");
     Ok(())
 }
 
@@ -147,12 +303,35 @@ pub fn load_saved_token(
     }
 }
 
-/// Logout - clear saved tokens
+/// Logout - open sign_out page in webview, then clear local tokens
 #[tauri::command]
 pub fn logout(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // Open sign_out in a temporary webview window
+    let app_clone = app.clone();
+    let win = tauri::WebviewWindowBuilder::new(
+        &app,
+        "signout",
+        tauri::WebviewUrl::External(
+            "https://download.ru/users/sign_out".parse().map_err(|e| format!("URL error: {}", e))?
+        ),
+    )
+    .title("Выход...")
+    .inner_size(400.0, 300.0)
+    .build()
+    .map_err(|e| format!("Failed to open signout window: {}", e))?;
+
+    // Close the window after a short delay (enough for sign_out to complete)
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        if let Some(w) = app_clone.get_webview_window("signout") {
+            let _ = w.close().ok();
+        }
+    });
+
+    // Clear local tokens
     let store = app.store(STORE_FILE)
         .map_err(|e| format!("Failed to open store: {}", e))?;
     store.delete("access_token");

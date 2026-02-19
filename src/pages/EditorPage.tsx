@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText, writeImage } from "@tauri-apps/plugin-clipboard-manager";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -460,52 +461,93 @@ function EditorPage() {
     }
   };
 
+  const doUpload = async () => {
+    const dataUrl = getStageDataUrl();
+    const base64 = dataUrl.split(",")[1];
+    const filename = `screenshot_${Date.now()}.png`;
+
+    const result = await invoke<UploadResponse>("upload_to_download", {
+      filename,
+      imageData: base64,
+    });
+
+    setUploadResult(result);
+    await writeText(result.secure_url);
+
+    let permissionGranted = await isPermissionGranted();
+    if (!permissionGranted) {
+      const permission = await requestPermission();
+      permissionGranted = permission === "granted";
+    }
+    if (permissionGranted) {
+      sendNotification({
+        title: "Скриншот загружен",
+        body: `Ссылка скопирована: ${result.secure_url}`,
+      });
+    }
+  };
+
   const handleUpload = async () => {
     setIsUploading(true);
     setError(null);
     setUploadResult(null);
 
     try {
-      // Check token first
+      // Check token — if missing, open auth and retry after success
       const token = await invoke<string | null>("get_access_token");
       if (!token) {
-        setError("Токен не настроен. Откройте настройки и добавьте токен download.ru");
-        setIsUploading(false);
-        return;
-      }
-
-      const dataUrl = getStageDataUrl();
-      const base64 = dataUrl.split(",")[1];
-      const filename = `screenshot_${Date.now()}.png`;
-
-      const result = await invoke<UploadResponse>("upload_to_download", {
-        filename,
-        imageData: base64,
-      });
-
-      setUploadResult(result);
-
-      // Copy URL to clipboard
-      await writeText(result.secure_url);
-
-      // Send notification
-      let permissionGranted = await isPermissionGranted();
-      if (!permissionGranted) {
-        const permission = await requestPermission();
-        permissionGranted = permission === "granted";
-      }
-      if (permissionGranted) {
-        sendNotification({
-          title: "Скриншот загружен",
-          body: `Ссылка скопирована: ${result.secure_url}`,
+        await invoke("open_oauth_browser");
+        // Wait for oauth-complete event then retry
+        const unlisten = await listen<boolean>("oauth-complete", async (event) => {
+          unlisten();
+          if (event.payload) {
+            setIsUploading(true);
+            setError(null);
+            try {
+              await doUpload();
+            } catch (err) {
+              setError(`Ошибка загрузки: ${err}`);
+            } finally {
+              setIsUploading(false);
+            }
+          } else {
+            setIsUploading(false);
+            setError("Авторизация не удалась. Попробуйте ещё раз.");
+          }
         });
+        return; // will finish in listener
       }
+
+      await doUpload();
     } catch (err) {
       const errorMsg = String(err);
-      if (errorMsg.includes("network") || errorMsg.includes("connection") || errorMsg.includes("timeout")) {
+      if (errorMsg.includes("401") || errorMsg.includes("unauthorized") || errorMsg.includes("No access token")) {
+        // Token expired — re-auth and retry
+        setError(null);
+        try {
+          await invoke("open_oauth_browser");
+          const unlisten = await listen<boolean>("oauth-complete", async (event) => {
+            unlisten();
+            if (event.payload) {
+              setIsUploading(true);
+              try {
+                await doUpload();
+              } catch (e) {
+                setError(`Ошибка загрузки: ${e}`);
+              } finally {
+                setIsUploading(false);
+              }
+            } else {
+              setIsUploading(false);
+              setError("Авторизация не удалась. Попробуйте ещё раз.");
+            }
+          });
+          return;
+        } catch (authErr) {
+          setError(`Ошибка авторизации: ${authErr}`);
+        }
+      } else if (errorMsg.includes("network") || errorMsg.includes("connection") || errorMsg.includes("timeout")) {
         setError("Ошибка сети. Проверьте подключение к интернету.");
-      } else if (errorMsg.includes("401") || errorMsg.includes("unauthorized")) {
-        setError("Неверный токен. Проверьте настройки.");
       } else {
         setError(`Ошибка загрузки: ${err}`);
       }

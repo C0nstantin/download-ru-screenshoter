@@ -28,6 +28,8 @@
     "clipboard-manager:default",
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-image",
+    "clipboard-manager:allow-read-image",
     "notification:default",
     "notification:allow-notify",
     "notification:allow-request-permission",

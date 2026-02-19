@@ -93,7 +93,6 @@ pub fn run() {
             commands::upload::set_access_token,
             commands::upload::get_access_token,
             commands::upload::open_oauth_browser,
-            commands::upload::exchange_oauth_code,
             commands::upload::refresh_oauth_token,
             commands::upload::load_saved_token,
             commands::upload::logout,
