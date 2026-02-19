@@ -245,8 +245,21 @@ function OverlayPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
+  // Focus the overlay div on mount for keyboard events
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Focus the overlay to receive keyboard events
+    overlayRef.current?.focus();
+  }, []);
+
   return (
-    <div className="overlay-page">
+    <div
+      className="overlay-page"
+      ref={overlayRef}
+      tabIndex={0}
+      onKeyDown={(e) => handleKeyDown(e.nativeEvent)}
+    >
       <canvas
         ref={canvasRef}
         className="overlay-canvas"
@@ -262,6 +275,20 @@ function OverlayPage() {
           {selection && !isSelecting
             ? "Enter или двойной клик — подтвердить • ПКМ/R — перевыбрать • ESC — отмена"
             : "Выделите область • ESC — отмена"}
+        </div>
+      )}
+      {/* Buttons for platforms where keyboard might not work */}
+      {selection && !isSelecting && (
+        <div className="overlay-buttons">
+          <button onClick={confirmSelection} className="overlay-btn confirm">
+            ✓ Подтвердить
+          </button>
+          <button onClick={() => setSelection(null)} className="overlay-btn reset">
+            ↺ Перевыбрать
+          </button>
+          <button onClick={closeOverlay} className="overlay-btn cancel">
+            ✕ Отмена
+          </button>
         </div>
       )}
     </div>

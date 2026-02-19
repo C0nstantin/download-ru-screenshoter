@@ -234,6 +234,51 @@ button.danger:hover:not(:disabled) {
   pointer-events: none;
 }
 
+.overlay-buttons {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 10;
+}
+
+.overlay-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity 0.2s;
+}
+
+.overlay-btn:hover {
+  opacity: 0.9;
+}
+
+.overlay-btn.confirm {
+  background: #22c55e;
+  color: #fff;
+}
+
+.overlay-btn.reset {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.overlay-btn.cancel {
+  background: #ef4444;
+  color: #fff;
+}
+
+.overlay-page:focus {
+  outline: none;
+}
+
 /* Editor Page */
 .editor-page {
   display: flex;
