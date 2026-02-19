@@ -50,7 +50,7 @@ pub fn run() {
                             let _ = commands::screenshot::start_region_capture(app_handle.clone());
                         }
                         "screenshot_full" => {
-                            let _ = commands::screenshot::capture_fullscreen_and_edit(app_handle.clone());
+                            let _ = commands::screenshot::capture_fullscreen_and_edit_internal(app_handle.clone(), None);
                         }
                         _ => {}
                     }
@@ -83,8 +83,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::screenshot::capture_fullscreen,
+            commands::screenshot::capture_fullscreen_and_edit,
             commands::screenshot::crop_image,
             commands::screenshot::get_current_screenshot,
+            commands::screenshot::get_displays,
             commands::screenshot::save_screenshot,
             commands::screenshot::open_editor,
             commands::upload::upload_to_download,

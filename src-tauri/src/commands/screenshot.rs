@@ -22,6 +22,39 @@ pub struct ScreenshotData {
     pub height: u32,
 }
 
+#[derive(serde::Serialize, Clone)]
+pub struct DisplayInfo {
+    pub id: u32,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub is_primary: bool,
+}
+
+/// Get list of all displays
+#[tauri::command]
+pub fn get_displays() -> Result<Vec<DisplayInfo>, String> {
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+
+    let displays: Vec<DisplayInfo> = screens.iter().enumerate().map(|(i, s)| {
+        DisplayInfo {
+            id: s.display_info.id,
+            name: format!("Display {}", i + 1),
+            x: s.display_info.x,
+            y: s.display_info.y,
+            width: s.display_info.width,
+            height: s.display_info.height,
+            is_primary: s.display_info.is_primary,
+        }
+    }).collect();
+
+    println!("Found {} displays: {:?}", displays.len(), displays.iter().map(|d| format!("{}x{} at ({},{})", d.width, d.height, d.x, d.y)).collect::<Vec<_>>());
+
+    Ok(displays)
+}
+
 /// Capture the primary screen and store in state
 #[tauri::command]
 pub fn capture_fullscreen(
@@ -175,28 +208,145 @@ pub fn open_editor(app: AppHandle, state: State<'_, AppState>) -> Result<(), Str
     create_editor_window(&app, dims.0, dims.1)
 }
 
-/// Start region capture - captures primary screen and shows overlay
+/// Start region capture - platform specific implementation
 pub fn start_region_capture(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        start_region_capture_macos(app)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        start_region_capture_overlay(app)
+    }
+}
+
+/// macOS: Use native screencapture -i (interactive) which handles multi-monitor
+#[cfg(target_os = "macos")]
+fn start_region_capture_macos(app: AppHandle) -> Result<(), String> {
+    println!("Starting native region capture (screencapture -i)...");
+
+    let temp_path = format!("/tmp/screenshot_region_{}.png", std::process::id());
+    let temp_path_clone = temp_path.clone();
+    let app_clone = app.clone();
+
+    std::thread::spawn(move || {
+        let output = Command::new("screencapture")
+            .args(["-i", "-x", &temp_path_clone])
+            .output();
+
+        match output {
+            Ok(result) if result.status.success() => {
+                if let Ok(png_bytes) = std::fs::read(&temp_path_clone) {
+                    let _ = std::fs::remove_file(&temp_path_clone);
+
+                    if png_bytes.is_empty() {
+                        println!("Region capture: cancelled by user");
+                        return;
+                    }
+
+                    if let Ok(img) = screenshots::image::load_from_memory(&png_bytes) {
+                        let (width, height) = (img.width(), img.height());
+                        let state = app_clone.state::<AppState>();
+
+                        {
+                            let mut current = state.current_screenshot.lock().unwrap();
+                            *current = Some(png_bytes);
+                        }
+                        {
+                            let mut dims = state.screenshot_dimensions.lock().unwrap();
+                            *dims = Some((width, height));
+                        }
+
+                        let _ = create_editor_window(&app_clone, width, height);
+                    }
+                }
+            }
+            _ => {
+                println!("Region capture: cancelled or failed");
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Linux/Windows: Use custom overlay for region selection
+#[cfg(not(target_os = "macos"))]
+fn start_region_capture_overlay(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
-    let screen = screens.iter()
-        .find(|s| s.display_info.is_primary)
-        .unwrap_or(&screens[0]);
 
-    println!("Region capture on screen: id={}, {}x{}",
-        screen.display_info.id, screen.display_info.width, screen.display_info.height);
+    if screens.is_empty() {
+        return Err("No screens found".to_string());
+    }
 
-    let image = screen.capture().map_err(|e| format!("Failed to capture screen: {}", e))?;
-    let (width, height) = (image.width(), image.height());
+    // Capture all screens and composite them
+    let mut captures: Vec<(screenshots::image::RgbaImage, i32, i32, f32)> = Vec::new();
 
-    println!("Captured image: {}x{}", width, height);
+    for screen in &screens {
+        let info = &screen.display_info;
+        if let Ok(img) = screen.capture() {
+            captures.push((img, info.x, info.y, info.scale_factor));
+        }
+    }
 
+    if captures.is_empty() {
+        return Err("Failed to capture any screen".to_string());
+    }
+
+    // Calculate bounding box
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
+
+    for (img, x, y, scale) in &captures {
+        let phys_x = (*x as f32 * scale) as i32;
+        let phys_y = (*y as f32 * scale) as i32;
+        min_x = min_x.min(phys_x);
+        min_y = min_y.min(phys_y);
+        max_x = max_x.max(phys_x + img.width() as i32);
+        max_y = max_y.max(phys_y + img.height() as i32);
+    }
+
+    let total_width = (max_x - min_x) as u32;
+    let total_height = (max_y - min_y) as u32;
+
+    // Create combined image
+    let mut combined = screenshots::image::RgbaImage::new(total_width, total_height);
+
+    for (img, x, y, scale) in &captures {
+        let phys_x = (*x as f32 * scale) as i32;
+        let phys_y = (*y as f32 * scale) as i32;
+        let offset_x = (phys_x - min_x) as u32;
+        let offset_y = (phys_y - min_y) as u32;
+
+        for py in 0..img.height() {
+            for px in 0..img.width() {
+                let pixel = img.get_pixel(px, py);
+                let dest_x = offset_x + px;
+                let dest_y = offset_y + py;
+                if dest_x < total_width && dest_y < total_height {
+                    combined.put_pixel(dest_x, dest_y, *pixel);
+                }
+            }
+        }
+    }
+
+    let (width, height) = (combined.width(), combined.height());
+
+    // Encode to PNG
     let mut png_bytes = Vec::new();
     let mut cursor = Cursor::new(&mut png_bytes);
-    image.write_to(&mut cursor, ImageFormat::Png)
+    combined.write_to(&mut cursor, ImageFormat::Png)
         .map_err(|e| format!("Failed to encode PNG: {}", e))?;
 
+    // Store in state
+    {
+        let mut offset = state.screen_offset.lock().unwrap();
+        *offset = Some((min_x, min_y));
+    }
     {
         let mut current = state.current_screenshot.lock().unwrap();
         *current = Some(png_bytes);
@@ -206,8 +356,8 @@ pub fn start_region_capture(app: AppHandle) -> Result<(), String> {
         *dims = Some((width, height));
     }
 
-    // Create overlay on primary screen
-    create_overlay_window(&app, 0, 0, width, height)?;
+    // Create overlay window spanning all screens
+    create_overlay_window(&app, min_x, min_y, total_width, total_height)?;
 
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.show();
@@ -217,40 +367,105 @@ pub fn start_region_capture(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Capture fullscreen and go directly to editor (uses native screencapture)
-pub fn capture_fullscreen_and_edit(app: AppHandle) -> Result<(), String> {
-    // Use native screencapture for reliable full-screen capture
-    // Save to Desktop so user can check the actual capture
-    let desktop_path = format!("{}/Desktop/debug_fullscreen.png",
-        std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()));
+/// Capture fullscreen and go directly to editor (tauri command wrapper)
+#[tauri::command]
+pub fn capture_fullscreen_and_edit(app: AppHandle, display_id: Option<u32>) -> Result<(), String> {
+    capture_fullscreen_and_edit_internal(app, display_id)
+}
 
-    println!("Capturing fullscreen to: {}", desktop_path);
+/// Capture fullscreen and go directly to editor
+/// If display_id is None, captures all displays. If Some(id), captures specific display.
+pub fn capture_fullscreen_and_edit_internal(app: AppHandle, display_id: Option<u32>) -> Result<(), String> {
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
 
-    // -x: no sound, -m: main display only
-    let output = Command::new("screencapture")
-        .args(["-x", "-m", &desktop_path])
-        .output()
-        .map_err(|e| format!("Failed to run screencapture: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!("screencapture failed: {:?}", output.stderr));
+    if screens.is_empty() {
+        return Err("No screens found".to_string());
     }
 
-    let png_bytes = std::fs::read(&desktop_path)
-        .map_err(|e| format!("Failed to read screenshot: {}", e))?;
+    let (png_bytes, width, height) = if let Some(id) = display_id {
+        // Capture specific display
+        let screen = screens.iter()
+            .find(|s| s.display_info.id == id)
+            .ok_or_else(|| format!("Display {} not found", id))?;
 
-    // Don't delete - leave for debugging
-    // let _ = std::fs::remove_file(&desktop_path);
+        println!("Capturing display {}: {}x{}", id, screen.display_info.width, screen.display_info.height);
 
-    if png_bytes.is_empty() {
-        return Err("Screenshot was empty".to_string());
-    }
+        let image = screen.capture().map_err(|e| format!("Failed to capture screen: {}", e))?;
+        let (w, h) = (image.width(), image.height());
 
-    let img = screenshots::image::load_from_memory(&png_bytes)
-        .map_err(|e| format!("Failed to load image: {}", e))?;
+        let mut bytes = Vec::new();
+        let mut cursor = Cursor::new(&mut bytes);
+        image.write_to(&mut cursor, ImageFormat::Png)
+            .map_err(|e| format!("Failed to encode PNG: {}", e))?;
 
-    let (width, height) = (img.width(), img.height());
-    println!("Fullscreen capture: {}x{} (file size: {} bytes)", width, height, png_bytes.len());
+        (bytes, w, h)
+    } else {
+        // Capture all displays combined - use same logic as start_region_capture
+        let mut captures: Vec<(screenshots::image::RgbaImage, i32, i32, f32)> = Vec::new();
+
+        for screen in &screens {
+            let info = &screen.display_info;
+            if let Ok(img) = screen.capture() {
+                println!("Screen {}: captured {}x{} (logical {}x{} at ({},{}) scale={})",
+                    info.id, img.width(), img.height(), info.width, info.height, info.x, info.y, info.scale_factor);
+                captures.push((img, info.x, info.y, info.scale_factor));
+            }
+        }
+
+        if captures.is_empty() {
+            return Err("Failed to capture any screen".to_string());
+        }
+
+        // Calculate bounding box using physical pixels
+        let mut min_x = i32::MAX;
+        let mut min_y = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut max_y = i32::MIN;
+
+        for (img, x, y, scale) in &captures {
+            let phys_x = (*x as f32 * scale) as i32;
+            let phys_y = (*y as f32 * scale) as i32;
+            min_x = min_x.min(phys_x);
+            min_y = min_y.min(phys_y);
+            max_x = max_x.max(phys_x + img.width() as i32);
+            max_y = max_y.max(phys_y + img.height() as i32);
+        }
+
+        let total_width = (max_x - min_x) as u32;
+        let total_height = (max_y - min_y) as u32;
+
+        println!("Capturing all {} displays: total {}x{} pixels", captures.len(), total_width, total_height);
+
+        let mut combined = screenshots::image::RgbaImage::new(total_width, total_height);
+
+        for (img, x, y, scale) in &captures {
+            let phys_x = (*x as f32 * scale) as i32;
+            let phys_y = (*y as f32 * scale) as i32;
+            let offset_x = (phys_x - min_x) as u32;
+            let offset_y = (phys_y - min_y) as u32;
+
+            for py in 0..img.height() {
+                for px in 0..img.width() {
+                    let pixel = img.get_pixel(px, py);
+                    let dest_x = offset_x + px;
+                    let dest_y = offset_y + py;
+                    if dest_x < total_width && dest_y < total_height {
+                        combined.put_pixel(dest_x, dest_y, *pixel);
+                    }
+                }
+            }
+        }
+
+        let (w, h) = (combined.width(), combined.height());
+        let mut bytes = Vec::new();
+        let mut cursor = Cursor::new(&mut bytes);
+        combined.write_to(&mut cursor, ImageFormat::Png)
+            .map_err(|e| format!("Failed to encode PNG: {}", e))?;
+
+        (bytes, w, h)
+    };
+
+    println!("Fullscreen capture: {}x{} ({} bytes)", width, height, png_bytes.len());
 
     let state = app.state::<AppState>();
     {
@@ -268,26 +483,35 @@ pub fn capture_fullscreen_and_edit(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Capture a window by clicking on it (using native macOS screencapture -w)
+/// Capture a window by clicking on it - platform specific
 pub fn capture_window_and_edit(app: AppHandle) -> Result<(), String> {
-    println!("capture_window_and_edit called");
+    #[cfg(target_os = "macos")]
+    {
+        capture_window_macos(app)
+    }
 
-    // Use native screencapture with -w for window selection
+    #[cfg(not(target_os = "macos"))]
+    {
+        // On Linux/Windows, fall back to region capture for now
+        // TODO: Implement proper window selection using platform APIs
+        println!("Window capture not implemented on this platform, using region capture");
+        start_region_capture(app)
+    }
+}
+
+/// macOS: Use native screencapture -w for window selection
+#[cfg(target_os = "macos")]
+fn capture_window_macos(app: AppHandle) -> Result<(), String> {
+    println!("capture_window_macos called");
+
     let temp_path = format!("/tmp/screenshot_window_{}.png", std::process::id());
-
-    // Spawn screencapture in background thread
     let temp_path_clone = temp_path.clone();
     let app_clone = app.clone();
 
     std::thread::spawn(move || {
-        println!("Window capture thread started");
-
-        // -x: no sound, -w: window mode (click to select), -o: no shadow
         let output = Command::new("screencapture")
             .args(["-x", "-w", "-o", &temp_path_clone])
             .output();
-
-        println!("screencapture finished: {:?}", output.as_ref().map(|o| o.status));
 
         match output {
             Ok(result) if result.status.success() => {
@@ -295,16 +519,12 @@ pub fn capture_window_and_edit(app: AppHandle) -> Result<(), String> {
                     let _ = std::fs::remove_file(&temp_path_clone);
 
                     if png_bytes.is_empty() {
-                        println!("Window capture: empty file, user cancelled");
+                        println!("Window capture: cancelled by user");
                         return;
                     }
 
-                    println!("Window capture: {} bytes", png_bytes.len());
-
                     if let Ok(img) = screenshots::image::load_from_memory(&png_bytes) {
                         let (width, height) = (img.width(), img.height());
-                        println!("Window capture image: {}x{}", width, height);
-
                         let state = app_clone.state::<AppState>();
 
                         {
@@ -316,14 +536,12 @@ pub fn capture_window_and_edit(app: AppHandle) -> Result<(), String> {
                             *dims = Some((width, height));
                         }
 
-                        println!("Creating editor window for window capture");
-                        let result = create_editor_window(&app_clone, width, height);
-                        println!("create_editor_window result: {:?}", result);
+                        let _ = create_editor_window(&app_clone, width, height);
                     }
                 }
             }
             Ok(result) => {
-                println!("screencapture exited with non-zero: {:?}", result.status);
+                println!("screencapture exited with: {:?}", result.status);
             }
             Err(e) => {
                 println!("screencapture error: {}", e);
@@ -334,29 +552,41 @@ pub fn capture_window_and_edit(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn create_overlay_window(app: &AppHandle, _offset_x: i32, _offset_y: i32, _width: u32, _height: u32) -> Result<(), String> {
+fn create_overlay_window(app: &AppHandle, _offset_x: i32, _offset_y: i32, _total_width: u32, _total_height: u32) -> Result<(), String> {
     // Close existing if any
     if let Some(existing) = app.get_webview_window("overlay") {
         let _ = existing.close();
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    // Get primary screen for overlay (simpler approach - just cover primary screen)
+    // Calculate logical bounding box of all screens
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
-    let primary = screens.iter()
-        .find(|s| s.display_info.is_primary)
-        .unwrap_or(&screens[0]);
 
-    let info = &primary.display_info;
-    let scale = info.scale_factor as f64;
+    println!("=== Creating overlay for {} screens ===", screens.len());
 
-    // Use screen dimensions directly (already in physical pixels for display_info)
-    let logical_width = info.width as f64 / scale;
-    let logical_height = info.height as f64 / scale;
-    let logical_x = info.x as f64;
-    let logical_y = info.y as f64;
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
 
-    println!("Creating overlay on primary screen: {}x{} at ({}, {}), scale={}",
-             logical_width, logical_height, logical_x, logical_y, scale);
+    for screen in &screens {
+        let info = &screen.display_info;
+        println!("  Screen {}: {}x{} at ({}, {}), scale={}, primary={}",
+            info.id, info.width, info.height, info.x, info.y, info.scale_factor, info.is_primary);
+
+        min_x = min_x.min(info.x);
+        min_y = min_y.min(info.y);
+        max_x = max_x.max(info.x + info.width as i32);
+        max_y = max_y.max(info.y + info.height as i32);
+    }
+
+    let logical_width = (max_x - min_x) as f64;
+    let logical_height = (max_y - min_y) as f64;
+    let logical_x = min_x as f64;
+    let logical_y = min_y as f64;
+
+    println!("  Bounding box: min=({}, {}), max=({}, {})", min_x, min_y, max_x, max_y);
+    println!("  Overlay window: {}x{} at ({}, {})", logical_width, logical_height, logical_x, logical_y);
 
     WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("index.html#/overlay".into()))
         .title("")

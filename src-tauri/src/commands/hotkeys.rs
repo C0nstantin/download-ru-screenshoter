@@ -184,7 +184,8 @@ pub fn handle_shortcut(app: &AppHandle, shortcut: &Shortcut) {
     if region_shortcut.as_ref() == Some(shortcut) {
         let _ = screenshot::start_region_capture(app.clone());
     } else if fullscreen_shortcut.as_ref() == Some(shortcut) {
-        if let Err(e) = screenshot::capture_fullscreen_and_edit(app.clone()) {
+        // Capture all displays by default (display_id = None)
+        if let Err(e) = screenshot::capture_fullscreen_and_edit_internal(app.clone(), None) {
             eprintln!("Error in fullscreen capture: {}", e);
         }
     } else if window_shortcut.as_ref() == Some(shortcut) {

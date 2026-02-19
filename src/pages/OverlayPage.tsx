@@ -193,23 +193,23 @@ function OverlayPage() {
       console.log("Cropping region:", { x: imgX, y: imgY, width: imgWidth, height: imgHeight });
 
       // Crop the image
-      await invoke("crop_image", {
+      const cropResult = await invoke("crop_image", {
         region: { x: imgX, y: imgY, width: imgWidth, height: imgHeight },
       });
+      console.log("Crop done, result:", cropResult);
 
-      console.log("Crop done, opening editor...");
-
-      // Open editor window BEFORE closing overlay
+      // Open editor BEFORE closing overlay (invoke needs active window)
+      console.log("Opening editor...");
       await invoke("open_editor");
       console.log("open_editor returned");
 
-      console.log("Editor opened, closing overlay...");
+      // Now close overlay
+      console.log("Closing overlay...");
+      closeOverlay(); // Don't await - just close
 
-      // Close overlay after editor is opened
-      await closeOverlay();
     } catch (err) {
       console.error("Failed to crop or open editor:", err);
-      await closeOverlay();
+      closeOverlay();
     }
   }, [selection, screenshot]);
 

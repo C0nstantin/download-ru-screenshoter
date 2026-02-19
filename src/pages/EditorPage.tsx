@@ -595,10 +595,17 @@ function EditorPage() {
     }
   };
 
-  if (!screenshot || !image || scale === null) {
+  // Show loading state but keep the full layout for proper scale calculation
+  if (!screenshot || !image) {
     return (
-      <div className="editor-loading" ref={containerRef}>
-        <p>Загрузка...</p>
+      <div className="editor-page">
+        <Toolbar />
+        <div className="editor-canvas-container" ref={containerRef}>
+          <p style={{ color: '#888' }}>Загрузка...</p>
+        </div>
+        <div className="editor-actions">
+          <button disabled>Загрузка...</button>
+        </div>
       </div>
     );
   }
@@ -613,6 +620,7 @@ function EditorPage() {
       <Toolbar />
 
       <div className="editor-canvas-container" ref={containerRef}>
+        {scale !== null ? (
           <Stage
             ref={stageRef}
             width={Math.round(screenshot.width * scale)}
@@ -751,6 +759,9 @@ function EditorPage() {
             <Transformer ref={transformerRef} />
           </Layer>
         </Stage>
+        ) : (
+          <p style={{ color: '#888' }}>Подготовка...</p>
+        )}
       </div>
 
       <div className="editor-actions">
