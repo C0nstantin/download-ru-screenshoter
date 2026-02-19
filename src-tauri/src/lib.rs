@@ -33,10 +33,11 @@ pub fn run() {
             let snap_i = MenuItem::with_id(&handle, "screenshot", "Скриншот области (Ctrl+Shift+4)", true, None::<&str>)?;
             let snap_full_i = MenuItem::with_id(&handle, "screenshot_full", "Скриншот экрана (Ctrl+Shift+3)", true, None::<&str>)?;
             let snap_win_i = MenuItem::with_id(&handle, "screenshot_window", "Скриншот окна (Ctrl+Shift+Alt+3)", true, None::<&str>)?;
+            let video_i = MenuItem::with_id(&handle, "video_record", "Запись видео (Ctrl+Shift+5)", true, None::<&str>)?;
             let settings_i = MenuItem::with_id(&handle, "settings", "Настройки...", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(&handle, "quit", "Выйти", true, None::<&str>)?;
 
-            let menu = Menu::with_items(&handle, &[&snap_i, &snap_full_i, &snap_win_i, &settings_i, &quit_i])?;
+            let menu = Menu::with_items(&handle, &[&snap_i, &snap_full_i, &snap_win_i, &video_i, &settings_i, &quit_i])?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -55,6 +56,9 @@ pub fn run() {
                         }
                         "screenshot_window" => {
                             let _ = commands::screenshot::capture_window_and_edit(app_handle.clone());
+                        }
+                        "video_record" => {
+                            let _ = commands::recording::start_video_capture(app_handle.clone());
                         }
                         _ => {}
                     }
@@ -105,6 +109,11 @@ pub fn run() {
             commands::hotkeys::get_hotkeys,
             commands::hotkeys::set_hotkeys,
             commands::settings::open_system_settings,
+            commands::recording::start_video_capture,
+            commands::recording::start_video_recording,
+            commands::recording::stop_video_recording,
+            commands::recording::is_recording,
+            commands::recording::move_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

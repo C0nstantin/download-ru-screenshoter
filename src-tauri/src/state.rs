@@ -5,6 +5,8 @@ pub struct AppState {
     pub screenshot_dimensions: Mutex<Option<(u32, u32)>>,
     pub screen_offset: Mutex<Option<(i32, i32)>>,
     pub access_token: Arc<Mutex<Option<String>>>,
+    pub recording_process: Mutex<Option<std::process::Child>>,
+    pub recording_path: Mutex<Option<String>>,
 }
 
 impl Default for AppState {
@@ -14,6 +16,8 @@ impl Default for AppState {
             screenshot_dimensions: Mutex::new(None),
             screen_offset: Mutex::new(None),
             access_token: Arc::new(Mutex::new(None)),
+            recording_process: Mutex::new(None),
+            recording_path: Mutex::new(None),
         }
     }
 }

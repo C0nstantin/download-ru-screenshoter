@@ -273,7 +273,7 @@ fn start_region_capture_macos(app: AppHandle) -> Result<(), String> {
 
 /// Linux/Windows: Use custom overlay for region selection
 #[cfg(not(target_os = "macos"))]
-fn start_region_capture_overlay(app: AppHandle) -> Result<(), String> {
+pub fn start_region_capture_overlay(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
 

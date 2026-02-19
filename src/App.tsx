@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import MainPage from "./pages/MainPage";
 import OverlayPage from "./pages/OverlayPage";
 import EditorPage from "./pages/EditorPage";
+import RecordingPage from "./pages/RecordingPage";
 import "./App.css";
 
 function App() {
   const [route, setRoute] = useState<string>("/");
 
   useEffect(() => {
-    // Simple hash-based routing for multi-window support
     const hash = window.location.hash.replace("#", "") || "/";
     setRoute(hash);
 
@@ -23,9 +23,13 @@ function App() {
 
   switch (route) {
     case "/overlay":
-      return <OverlayPage />;
+      return <OverlayPage mode="screenshot" />;
+    case "/overlay-video":
+      return <OverlayPage mode="video" />;
     case "/editor":
       return <EditorPage />;
+    case "/recording":
+      return <RecordingPage />;
     default:
       return <MainPage />;
   }

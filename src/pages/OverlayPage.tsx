@@ -15,7 +15,7 @@ interface SelectionRect {
   endY: number;
 }
 
-function OverlayPage() {
+function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [screenshot, setScreenshot] = useState<ScreenshotData | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
@@ -190,25 +190,25 @@ function OverlayPage() {
     const imgHeight = Math.min(screenshot.height - imgY, Math.round(height * scaleY));
 
     try {
-      console.log("Cropping region:", { x: imgX, y: imgY, width: imgWidth, height: imgHeight });
-
-      // Crop the image
-      const cropResult = await invoke("crop_image", {
-        region: { x: imgX, y: imgY, width: imgWidth, height: imgHeight },
-      });
-      console.log("Crop done, result:", cropResult);
-
-      // Open editor BEFORE closing overlay (invoke needs active window)
-      console.log("Opening editor...");
-      await invoke("open_editor");
-      console.log("open_editor returned");
-
-      // Now close overlay
-      console.log("Closing overlay...");
-      closeOverlay(); // Don't await - just close
-
+      if (mode === "video") {
+        // For video: pass CSS pixel coords (logical screen coords) to screencapture
+        const vidX = Math.round(Math.min(selection.startX, selection.endX));
+        const vidY = Math.round(Math.min(selection.startY, selection.endY));
+        const vidW = Math.round(Math.abs(selection.endX - selection.startX));
+        const vidH = Math.round(Math.abs(selection.endY - selection.startY));
+        closeOverlay();
+        await invoke("start_video_recording", { x: vidX, y: vidY, width: vidW, height: vidH });
+      } else {
+        // Screenshot mode
+        const cropResult = await invoke("crop_image", {
+          region: { x: imgX, y: imgY, width: imgWidth, height: imgHeight },
+        });
+        console.log("Crop done, result:", cropResult);
+        await invoke("open_editor");
+        closeOverlay();
+      }
     } catch (err) {
-      console.error("Failed to crop or open editor:", err);
+      console.error("Failed:", err);
       closeOverlay();
     }
   }, [selection, screenshot]);
@@ -284,8 +284,12 @@ function OverlayPage() {
       {imageLoaded && (
         <div className="overlay-hint">
           {selection && !isSelecting
-            ? "Enter или двойной клик — подтвердить • ПКМ/R — перевыбрать • ESC — отмена"
-            : "Выделите область • ESC — отмена"}
+            ? mode === "video"
+              ? "Enter или двойной клик — начать запись • ПКМ/R — перевыбрать • ESC — отмена"
+              : "Enter или двойной клик — подтвердить • ПКМ/R — перевыбрать • ESC — отмена"
+            : mode === "video"
+              ? "Выделите область для записи видео • ESC — отмена"
+              : "Выделите область • ESC — отмена"}
         </div>
       )}
       {/* Buttons for platforms where keyboard might not work */}
