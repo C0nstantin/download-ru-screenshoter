@@ -25,7 +25,32 @@
 2. AppImage: `chmod +x Download-Screenshoter.AppImage && ./Download-Screenshoter.AppImage`
 3. deb: `sudo dpkg -i download-screenshoter.deb`
 
-> На Linux может потребоваться `xdotool` для захвата окон.
+**Системные зависимости** (Ubuntu/Debian):
+
+```bash
+sudo apt install -y \
+  libwebkit2gtk-4.1-dev \
+  libgtk-3-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev \
+  libssl-dev \
+  libxcb-composite0-dev \
+  libx11-dev \
+  xdotool
+```
+
+Fedora/RHEL:
+
+```bash
+sudo dnf install -y \
+  webkit2gtk4.1-devel \
+  gtk3-devel \
+  libayatana-appindicator-gtk3-devel \
+  librsvg2-devel \
+  openssl-devel \
+  libxcb-devel \
+  xdotool
+```
 
 ---
 
@@ -59,6 +84,8 @@
 - [Tauri CLI](https://tauri.app/start/prerequisites/)
 
 На macOS дополнительно: Xcode Command Line Tools (`xcode-select --install`)
+
+На Linux дополнительно: системные зависимости из раздела установки выше
 
 ### Запуск
 
