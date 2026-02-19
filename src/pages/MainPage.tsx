@@ -8,8 +8,9 @@ interface HotkeyConfig {
 }
 
 function MainPage() {
-  const [token, setToken] = useState("");
-  const [savedToken, setSavedToken] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [oauthCode, setOauthCode] = useState("");
+  const [showCodeInput, setShowCodeInput] = useState(false);
   const [status, setStatus] = useState("");
   const [hotkeys, setHotkeys] = useState<HotkeyConfig>({
     region: "Ctrl+Shift+4",
@@ -21,13 +22,8 @@ function MainPage() {
 
   useEffect(() => {
     // Load saved token on mount
-    invoke<string | null>("get_access_token")
-      .then((t) => {
-        if (t) {
-          setSavedToken(t);
-          setToken(t);
-        }
-      })
+    invoke<boolean>("load_saved_token")
+      .then((loaded) => setIsLoggedIn(loaded))
       .catch(console.error);
 
     // Load hotkeys
@@ -36,23 +32,38 @@ function MainPage() {
       .catch(console.error);
   }, []);
 
-  const handleSaveToken = async () => {
+  const handleLogin = async () => {
     try {
-      await invoke("set_access_token", { token });
-      setSavedToken(token);
-      setStatus("Токен сохранён!");
-      setTimeout(() => setStatus(""), 3000);
+      await invoke("open_oauth_browser");
+      setShowCodeInput(true);
+      setStatus("Войдите в браузере и вставьте полученный код");
     } catch (err) {
       setStatus(`Ошибка: ${err}`);
     }
   };
 
-  const handleClearToken = async () => {
+  const handleExchangeCode = async () => {
+    if (!oauthCode.trim()) return;
     try {
-      await invoke("set_access_token", { token: "" });
-      setSavedToken(null);
-      setToken("");
-      setStatus("Токен удалён");
+      setStatus("Получаем токен...");
+      await invoke("exchange_oauth_code", { code: oauthCode.trim() });
+      setIsLoggedIn(true);
+      setShowCodeInput(false);
+      setOauthCode("");
+      setStatus("Успешно авторизованы!");
+      setTimeout(() => setStatus(""), 3000);
+    } catch (err) {
+      setStatus(`Ошибка авторизации: ${err}`);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await invoke("logout");
+      setIsLoggedIn(false);
+      setShowCodeInput(false);
+      setOauthCode("");
+      setStatus("Выход выполнен");
       setTimeout(() => setStatus(""), 3000);
     } catch (err) {
       setStatus(`Ошибка: ${err}`);
@@ -188,35 +199,53 @@ function MainPage() {
       </section>
 
       <section className="section">
-        <h2>Настройки download.ru</h2>
-        <p className="hint">
-          Для загрузки скриншотов нужен OAuth токен.
-          <br />
-          Получите его в настройках профиля на download.ru
-        </p>
+        <h2>Аккаунт download.ru</h2>
 
-        <div className="token-form">
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Вставьте access token..."
-            className="token-input"
-          />
-          <div className="token-buttons">
-            <button onClick={handleSaveToken} disabled={!token}>
-              Сохранить
+        {isLoggedIn ? (
+          <div className="auth-status">
+            <p className="token-status success">Вы авторизованы</p>
+            <button onClick={handleLogout} className="danger">
+              Выйти
             </button>
-            {savedToken && (
-              <button onClick={handleClearToken} className="danger">
-                Удалить
-              </button>
+          </div>
+        ) : (
+          <div className="auth-form">
+            {!showCodeInput ? (
+              <>
+                <p className="hint">
+                  Войдите в аккаунт download.ru для загрузки скриншотов
+                </p>
+                <button onClick={handleLogin} className="primary">
+                  Войти через download.ru
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="hint">
+                  Браузер открыт. После входа скопируйте код и вставьте сюда:
+                </p>
+                <div className="token-form">
+                  <input
+                    type="text"
+                    value={oauthCode}
+                    onChange={(e) => setOauthCode(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleExchangeCode()}
+                    placeholder="Вставьте код авторизации..."
+                    className="token-input"
+                    autoFocus
+                  />
+                  <div className="token-buttons">
+                    <button onClick={handleExchangeCode} disabled={!oauthCode.trim()}>
+                      Подтвердить
+                    </button>
+                    <button onClick={() => { setShowCodeInput(false); setOauthCode(""); }}>
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
           </div>
-        </div>
-
-        {savedToken && (
-          <p className="token-status success">Токен настроен</p>
         )}
 
         {status && <p className="status">{status}</p>}

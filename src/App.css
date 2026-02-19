@@ -144,6 +144,23 @@ kbd {
   color: #4ade80;
 }
 
+.auth-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.auth-status .token-status {
+  margin-top: 0;
+  flex: 1;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .status {
   margin-top: 10px;
   color: #888;
