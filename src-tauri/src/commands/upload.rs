@@ -187,28 +187,29 @@ struct FileObject {
 
 #[derive(serde::Deserialize)]
 struct FolderListResponse {
-    object: FolderContents,
+    contents: Vec<ContentItem>,
 }
 
 #[derive(serde::Deserialize)]
-struct FolderContents {
-    folders: Vec<FolderItem>,
-}
-
-#[derive(serde::Deserialize)]
-struct FolderItem {
+struct ContentItem {
     id: String,
     name: String,
+    is_dir: bool,
 }
 
 #[derive(serde::Deserialize)]
 struct CreateFolderResponse {
-    object: FolderItem,
+    object: FolderObject,
+}
+
+#[derive(serde::Deserialize)]
+struct FolderObject {
+    id: String,
 }
 
 /// Get or create .screenshots folder, return its id
 async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str) -> Result<String, String> {
-    // List root folders
+    // List root folder contents
     let resp = client
         .get("https://download.ru/folders.json")
         .header("Authorization", format!("Bearer {}", token))
@@ -224,8 +225,8 @@ async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str)
     let folder_list: FolderListResponse = resp.json().await
         .map_err(|e| format!("Failed to parse folders: {}", e))?;
 
-    // Look for .screenshots
-    if let Some(f) = folder_list.object.folders.iter().find(|f| f.name == ".screenshots") {
+    // Look for .screenshots folder in contents
+    if let Some(f) = folder_list.contents.iter().find(|f| f.is_dir && f.name == ".screenshots") {
         println!("Found .screenshots folder: {}", f.id);
         return Ok(f.id.clone());
     }
@@ -323,10 +324,17 @@ pub async fn upload_to_download(
     let api_response: ApiResponse = serde_json::from_str(&body)
         .map_err(|e| format!("Failed to parse response: {} | body: {}", e, &body[..body.len().min(300)]))?;
 
+    // secure_url may be relative like /g/xxx... - prepend domain
+    let secure_url = if api_response.object.secure_url.starts_with('/') {
+        format!("https://download.ru{}", api_response.object.secure_url)
+    } else {
+        api_response.object.secure_url
+    };
+
     Ok(UploadResponse {
         id: api_response.object.id,
         name: api_response.object.name,
-        secure_url: api_response.object.secure_url,
+        secure_url,
         shared: api_response.object.shared,
     })
 }
