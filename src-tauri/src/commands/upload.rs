@@ -486,7 +486,7 @@ pub async fn upload_to_download(
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/json")
         .header("X-Requested-With", "XMLHttpRequest")
-        .header("User-Agent", "DownloadScreenshoter/1.0")
+        .header("User-Agent", "DownloadRuScreenshoter/1.0")
         .multipart(form)
         .send()
         .await

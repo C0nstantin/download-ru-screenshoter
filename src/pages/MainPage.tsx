@@ -115,7 +115,7 @@ function MainPage() {
 
   return (
     <main className="main-page">
-      <h1>Download Screenshoter</h1>
+      <h1>DownloadRu Screenshoter</h1>
 
       <section className="section">
         <h2>Горячие клавиши</h2>

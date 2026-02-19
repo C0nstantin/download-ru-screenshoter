@@ -1,4 +1,4 @@
-# Download Screenshoter
+# DownloadRu Screenshoter
 
 Приложение для создания скриншотов с редактированием и автоматической загрузкой на [download.ru](https://download.ru).
 
@@ -22,8 +22,8 @@
 ### Linux
 
 1. Скачай `.AppImage` или `.deb` из [Releases](../../releases)
-2. AppImage: `chmod +x Download-Screenshoter.AppImage && ./Download-Screenshoter.AppImage`
-3. deb: `sudo dpkg -i download-screenshoter.deb`
+2. AppImage: `chmod +x DownloadRu-Screenshoter.AppImage && ./DownloadRu-Screenshoter.AppImage`
+3. deb: `sudo dpkg -i downloadru-screenshoter.deb`
 
 **Системные зависимости** (Ubuntu/Debian):
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Download Screenshoter",
+  "productName": "DownloadRu Screenshoter",
   "version": "0.1.0",
-  "identifier": "com.karataev.download",
+  "identifier": "com.karataev.downloadru",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Download Screenshoter - Настройки",
+        "title": "DownloadRu Screenshoter - Настройки",
         "width": 450,
         "height": 400,
         "visible": false,
