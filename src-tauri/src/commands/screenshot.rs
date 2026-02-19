@@ -621,6 +621,9 @@ fn create_overlay_window(app: &AppHandle, _offset_x: i32, _offset_y: i32, _total
 
 fn create_editor_window(app: &AppHandle, width: u32, height: u32) -> Result<(), String> {
     println!("Creating editor window for image {}x{}", width, height);
+    // Show in Dock and Cmd+Tab when editor opens
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
 
     // Calculate window size - add padding for toolbar and actions
     let win_width = ((width as f64 * 0.8) + 100.0).min(1400.0).max(600.0);

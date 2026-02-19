@@ -21,7 +21,7 @@ const colors = [
 ];
 
 function Toolbar() {
-  const { tool, color, strokeWidth, setTool, setColor, setStrokeWidth } =
+  const { tool, color, strokeWidth, fontSize, setTool, setColor, setStrokeWidth, setFontSize } =
     useEditorStore();
 
   return (
@@ -67,6 +67,20 @@ function Toolbar() {
         />
         <span className="stroke-value">{strokeWidth}px</span>
       </div>
+
+      {tool === "text" && (
+        <div className="toolbar-section">
+          <span className="toolbar-label">Шрифт:</span>
+          <input
+            type="range"
+            min="10"
+            max="72"
+            value={fontSize}
+            onChange={(e) => setFontSize(Number(e.target.value))}
+          />
+          <span className="stroke-value">{fontSize}px</span>
+        </div>
+      )}
     </div>
   );
 }

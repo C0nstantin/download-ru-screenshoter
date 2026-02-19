@@ -76,12 +76,21 @@ function MainPage() {
     if (e.altKey) parts.push("Alt");
     if (e.shiftKey) parts.push("Shift");
 
-    let key = e.key;
+    const key = e.key;
     if (key === "Control" || key === "Meta" || key === "Alt" || key === "Shift") return;
-    if (key.length === 1) key = key.toUpperCase();
-    else if (key.startsWith("Digit")) key = key.replace("Digit", "");
-    else if (key.startsWith("Key")) key = key.replace("Key", "");
-    parts.push(key);
+
+    // Use e.code for physical key to avoid layout-specific chars (e.g. Shift+2 → "@")
+    let normalized: string;
+    if (e.code.startsWith("Digit")) {
+      normalized = e.code.replace("Digit", "");
+    } else if (e.code.startsWith("Key")) {
+      normalized = e.code.replace("Key", "");
+    } else if (key.length === 1) {
+      normalized = key.toUpperCase();
+    } else {
+      normalized = key;
+    }
+    parts.push(normalized);
 
     if (parts.length < 2) {
       setStatus("Нужно использовать модификатор (Ctrl, Cmd, Alt, Shift)");

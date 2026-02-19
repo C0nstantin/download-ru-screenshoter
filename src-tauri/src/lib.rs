@@ -32,10 +32,11 @@ pub fn run() {
             // Create tray menu - without "show window" option
             let snap_i = MenuItem::with_id(&handle, "screenshot", "Скриншот области (Ctrl+Shift+4)", true, None::<&str>)?;
             let snap_full_i = MenuItem::with_id(&handle, "screenshot_full", "Скриншот экрана (Ctrl+Shift+3)", true, None::<&str>)?;
+            let snap_win_i = MenuItem::with_id(&handle, "screenshot_window", "Скриншот окна (Ctrl+Shift+Alt+3)", true, None::<&str>)?;
             let settings_i = MenuItem::with_id(&handle, "settings", "Настройки...", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(&handle, "quit", "Выйти", true, None::<&str>)?;
 
-            let menu = Menu::with_items(&handle, &[&snap_i, &snap_full_i, &settings_i, &quit_i])?;
+            let menu = Menu::with_items(&handle, &[&snap_i, &snap_full_i, &snap_win_i, &settings_i, &quit_i])?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -51,6 +52,9 @@ pub fn run() {
                         }
                         "screenshot_full" => {
                             let _ = commands::screenshot::capture_fullscreen_and_edit_internal(app_handle.clone(), None);
+                        }
+                        "screenshot_window" => {
+                            let _ = commands::screenshot::capture_window_and_edit(app_handle.clone());
                         }
                         _ => {}
                     }
@@ -73,11 +77,13 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Hide windows instead of closing (except overlay)
                 let label = window.label();
                 if label == "main" || label == "editor" {
                     window.hide().unwrap();
                     api.prevent_close();
+                    // Hide from Dock and Cmd+Tab when no windows are visible
+                    #[cfg(target_os = "macos")]
+                    update_activation_policy(window.app_handle());
                 }
             }
         })
@@ -105,8 +111,26 @@ pub fn run() {
 }
 
 fn show_settings_window(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn update_activation_policy(app: &AppHandle) {
+    let main_visible = app.get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+    let editor_visible = app.get_webview_window("editor")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+
+    if !main_visible && !editor_visible {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     }
 }

@@ -15,12 +15,14 @@ export interface Shape {
   number?: number;
   color: string;
   strokeWidth: number;
+  fontSize?: number;
 }
 
 interface EditorState {
   tool: Tool;
   color: string;
   strokeWidth: number;
+  fontSize: number;
   shapes: Shape[];
   selectedId: string | null;
   history: Shape[][];
@@ -30,6 +32,7 @@ interface EditorState {
   setTool: (tool: Tool) => void;
   setColor: (color: string) => void;
   setStrokeWidth: (width: number) => void;
+  setFontSize: (size: number) => void;
   addShape: (shape: Shape) => void;
   updateShape: (id: string, updates: Partial<Shape>) => void;
   deleteShape: (id: string) => void;
@@ -47,9 +50,11 @@ interface PreferencesState {
   lastTool: Tool;
   lastColor: string;
   lastStrokeWidth: number;
+  lastFontSize: number;
   setLastTool: (tool: Tool) => void;
   setLastColor: (color: string) => void;
   setLastStrokeWidth: (width: number) => void;
+  setLastFontSize: (size: number) => void;
 }
 
 export const usePreferencesStore = create<PreferencesState>()(
@@ -58,9 +63,11 @@ export const usePreferencesStore = create<PreferencesState>()(
       lastTool: 'arrow',
       lastColor: '#ff0000',
       lastStrokeWidth: 3,
+      lastFontSize: 20,
       setLastTool: (lastTool) => set({ lastTool }),
       setLastColor: (lastColor) => set({ lastColor }),
       setLastStrokeWidth: (lastStrokeWidth) => set({ lastStrokeWidth }),
+      setLastFontSize: (lastFontSize) => set({ lastFontSize }),
     }),
     {
       name: 'editor-preferences',
@@ -72,6 +79,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   tool: usePreferencesStore.getState().lastTool,
   color: usePreferencesStore.getState().lastColor,
   strokeWidth: usePreferencesStore.getState().lastStrokeWidth,
+  fontSize: usePreferencesStore.getState().lastFontSize,
   shapes: [],
   selectedId: null,
   history: [[]],
@@ -89,6 +97,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setStrokeWidth: (strokeWidth) => {
     set({ strokeWidth });
     usePreferencesStore.getState().setLastStrokeWidth(strokeWidth);
+  },
+  setFontSize: (fontSize) => {
+    set({ fontSize });
+    usePreferencesStore.getState().setLastFontSize(fontSize);
   },
 
   addShape: (shape) => set((state) => {

@@ -159,6 +159,7 @@ function EditorPage() {
     tool,
     color,
     strokeWidth,
+    fontSize,
     shapes,
     selectedId,
     addShape,
@@ -173,6 +174,9 @@ function EditorPage() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [newShape, setNewShape] = useState<Shape | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [textInput, setTextInput] = useState<{ x: number; y: number; stageX: number; stageY: number } | null>(null);
+  const [textValue, setTextValue] = useState("");
+  const textInputRef = useRef<HTMLInputElement>(null);
 
   // Load screenshot on mount
   useEffect(() => {
@@ -335,14 +339,18 @@ function EditorPage() {
         height: 0,
       });
     } else if (tool === "text") {
-      const text = prompt("Введите текст:");
-      if (text) {
-        addShape({
-          ...baseShape,
-          type: "text",
-          text,
-        });
-      }
+      // Show inline text input at click position
+      const stage = stageRef.current;
+      if (!stage) return;
+      const stageBox = stage.container().getBoundingClientRect();
+      setTextInput({
+        x: stageBox.left + pos.x * scale!,
+        y: stageBox.top + pos.y * scale!,
+        stageX: pos.x,
+        stageY: pos.y,
+      });
+      setTextValue("");
+      setTimeout(() => textInputRef.current?.focus(), 0);
       setIsDrawing(false);
     } else if (tool === "number") {
       addShape({
@@ -395,6 +403,23 @@ function EditorPage() {
     }
 
     setNewShape(null);
+  };
+
+  const confirmTextInput = () => {
+    if (textInput && textValue.trim()) {
+      addShape({
+        id: `shape_${Date.now()}`,
+        type: "text",
+        x: textInput.stageX,
+        y: textInput.stageY,
+        color,
+        strokeWidth,
+        fontSize,
+        text: textValue.trim(),
+      });
+    }
+    setTextInput(null);
+    setTextValue("");
   };
 
   const handleShapeClick = (id: string) => {
@@ -574,9 +599,14 @@ function EditorPage() {
       }
       await writeImage(bytes);
       setError(null);
-      // Show brief success message
-      setUploadResult({ id: "", name: "", secure_url: "Изображение скопировано!", shared: false });
-      setTimeout(() => setUploadResult(null), 2000);
+      let permissionGranted = await isPermissionGranted();
+      if (!permissionGranted) {
+        const permission = await requestPermission();
+        permissionGranted = permission === "granted";
+      }
+      if (permissionGranted) {
+        sendNotification({ title: "Скопировано", body: "Изображение скопировано в буфер обмена" });
+      }
     } catch (err) {
       setError(`Ошибка копирования: ${err}`);
     }
@@ -722,7 +752,7 @@ function EditorPage() {
                     x={shape.x}
                     y={shape.y}
                     text={shape.text}
-                    fontSize={20}
+                    fontSize={shape.fontSize ?? 20}
                     fill={shape.color}
                     draggable={tool === "select"}
                     onClick={() => handleShapeClick(shape.id)}
@@ -844,6 +874,44 @@ function EditorPage() {
       )}
 
       {error && <div className="upload-result error">{error}</div>}
+
+      {isUploading && (
+        <div className="upload-overlay">
+          <div className="spinner" />
+          <p>Загрузка на download.ru...</p>
+        </div>
+      )}
+
+      {textInput && (
+        <div
+          style={{
+            position: "fixed",
+            left: textInput.x,
+            top: textInput.y,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.85)",
+            borderRadius: 6,
+            padding: "6px 8px",
+            display: "flex",
+            gap: 6,
+            boxShadow: "0 2px 12px rgba(0,0,0,0.5)",
+          }}
+        >
+          <input
+            ref={textInputRef}
+            type="text"
+            value={textValue}
+            onChange={(e) => setTextValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") confirmTextInput();
+              if (e.key === "Escape") { setTextInput(null); setTextValue(""); }
+            }}
+            placeholder="Введите текст..."
+            style={{ minWidth: 160, fontSize: 14, padding: "2px 6px" }}
+          />
+          <button onClick={confirmTextInput} style={{ padding: "2px 10px" }}>OK</button>
+        </div>
+      )}
     </div>
   );
 }
