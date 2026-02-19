@@ -386,6 +386,11 @@ struct FolderObject {
     id: String,
 }
 
+/// Get or create .screenshots folder, return its id (public alias for use from recording.rs)
+pub async fn get_or_create_screenshots_folder_pub(client: &reqwest::Client, token: &str) -> Result<String, String> {
+    get_or_create_screenshots_folder(client, token).await
+}
+
 /// Get or create .screenshots folder, return its id
 async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str) -> Result<String, String> {
     // List root folder contents

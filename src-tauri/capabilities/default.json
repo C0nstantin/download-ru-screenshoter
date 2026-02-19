@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for all windows",
-  "windows": ["main", "overlay", "editor", "recording", "overlay-video", "oauth", "signout"],
+  "windows": ["main", "overlay", "editor", "recording", "overlay-video", "oauth", "signout", "video-result"],
   "permissions": [
     "core:default",
     "core:tray:default",

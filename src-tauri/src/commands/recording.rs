@@ -1,79 +1,45 @@
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use crate::state::AppState;
 
-/// Open region selection overlay in video recording mode.
-/// Captures full screen first, then shows overlay for user to select region.
+/// Start video capture using native macOS picker (screencapture -v -i).
+/// User selects region/window/screen via macOS built-in UI, no custom overlay needed.
+/// On Linux/Windows falls back to custom overlay — see VIDEO_RECORDING.md.
 #[tauri::command]
-pub fn start_video_capture(app: AppHandle) -> Result<(), String> {
-    // On macOS the normal region capture uses interactive screencapture -i,
-    // but for video we need coordinates first, so always use the overlay flow.
-    // Capture all screens into state, then open overlay in video mode.
-    capture_screens_for_video(app)
-}
+pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let output_path = format!("/tmp/recording_{}.mov", timestamp);
 
-fn capture_screens_for_video(app: AppHandle) -> Result<(), String> {
-    use screenshots::Screen;
-    use screenshots::image::{RgbaImage, GenericImage, ImageEncoder, ColorType};
-    use tauri::Manager;
+        // -v: video recording — screencapture shows native macOS recording picker automatically
+        // Handles multi-monitor and region selection correctly
+        let child = std::process::Command::new("screencapture")
+            .args(["-v", &output_path])
+            .spawn()
+            .map_err(|e| format!("Failed to start screencapture: {}", e))?;
 
-    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
-    if screens.is_empty() {
-        return Err("No screens found".into());
-    }
-
-    // Capture all screens into a composite image (same as start_region_capture_overlay)
-    let min_x = screens.iter().map(|s| s.display_info.x).min().unwrap_or(0);
-    let min_y = screens.iter().map(|s| s.display_info.y).min().unwrap_or(0);
-    let max_x = screens.iter().map(|s| s.display_info.x + s.display_info.width as i32).max().unwrap_or(1920);
-    let max_y = screens.iter().map(|s| s.display_info.y + s.display_info.height as i32).max().unwrap_or(1080);
-    let total_w = (max_x - min_x) as u32;
-    let total_h = (max_y - min_y) as u32;
-
-    let mut composite = RgbaImage::new(total_w, total_h);
-    for screen in &screens {
-        if let Ok(img) = screen.capture() {
-            let buffer: RgbaImage = img;
-            let ox = (screen.display_info.x - min_x) as u32;
-            let oy = (screen.display_info.y - min_y) as u32;
-            let _ = composite.copy_from(&buffer, ox, oy);
+        {
+            let mut proc = state.recording_process.lock().unwrap();
+            *proc = Some(child);
         }
+        {
+            let mut path = state.recording_path.lock().unwrap();
+            *path = Some(output_path);
+        }
+
+        show_recording_window(&app)?;
+        return Ok(());
     }
 
-    let mut png_bytes = Vec::new();
-    let encoder = screenshots::image::codecs::png::PngEncoder::new(&mut png_bytes);
-    encoder.write_image(composite.as_raw(), total_w, total_h, ColorType::Rgba8.into())
-        .map_err(|e| format!("PNG encode error: {}", e))?;
-
-    let state = app.state::<crate::state::AppState>();
+    #[cfg(not(target_os = "macos"))]
     {
-        let mut ss = state.current_screenshot.lock().unwrap();
-        *ss = Some(png_bytes);
+        // TODO: Linux/Windows — see VIDEO_RECORDING.md
+        let _ = app;
+        Err("Video recording not yet implemented on this platform. See VIDEO_RECORDING.md".into())
     }
-    {
-        let mut dims = state.screenshot_dimensions.lock().unwrap();
-        *dims = Some((total_w, total_h));
-    }
-
-    // Close existing overlay, open new one in video mode
-    if let Some(w) = app.get_webview_window("overlay") {
-        let _ = w.destroy();
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-
-    tauri::WebviewWindowBuilder::new(
-        &app,
-        "overlay",
-        tauri::WebviewUrl::App("index.html#/overlay-video".into()),
-    )
-    .fullscreen(true)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .decorations(false)
-    .focused(true)
-    .build()
-    .map_err(|e| format!("Failed to create video overlay: {}", e))?;
-
-    Ok(())
 }
 
 /// Start recording the selected region (called from overlay after region selection)
@@ -154,10 +120,14 @@ pub fn stop_video_recording(
         }
     }
 
-    // Clear recording path
+    // Clear active recording path, save as last_recording_path for result window
     {
         let mut p = state.recording_path.lock().unwrap();
         *p = None;
+    }
+    {
+        let mut last = state.last_recording_path.lock().unwrap();
+        *last = Some(path.clone());
     }
 
     // Close recording indicator
@@ -165,9 +135,20 @@ pub fn stop_video_recording(
         let _ = w.close().ok();
     }
 
-    // Restore normal activation policy
-    #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    // Give screencapture a moment to flush the file to disk
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // Only open result window if file actually exists
+    if std::fs::metadata(&path).is_ok() {
+        open_video_result_window(&app, &path)?;
+    } else {
+        // File not created (user cancelled picker or recording too short)
+        eprintln!("Recording file not found: {} — user may have cancelled", path);
+        {
+            let mut last = state.last_recording_path.lock().unwrap();
+            *last = None;
+        }
+    }
 
     Ok(path)
 }
@@ -178,6 +159,159 @@ pub fn is_recording(state: State<'_, AppState>) -> bool {
     state.recording_process.lock().unwrap().is_some()
 }
 
+/// Get path of the last recording (stored temporarily after stop)
+#[tauri::command]
+pub fn get_last_recording_path(state: State<'_, AppState>) -> Result<String, String> {
+    // After stop_video_recording the path was cleared; we store it separately
+    let p = state.last_recording_path.lock().unwrap();
+    p.clone().ok_or("No recent recording found".into())
+}
+
+/// Delete a recording file
+#[tauri::command]
+pub fn delete_recording(path: String) -> Result<(), String> {
+    std::fs::remove_file(&path).map_err(|e| format!("Failed to delete: {}", e))
+}
+
+/// Get info about a recorded video file
+#[tauri::command]
+pub fn get_video_info(path: String) -> Result<serde_json::Value, String> {
+    let metadata = std::fs::metadata(&path)
+        .map_err(|e| format!("File not found: {}", e))?;
+    Ok(serde_json::json!({
+        "path": path,
+        "size": metadata.len(),
+        "name": std::path::Path::new(&path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("recording.mov"),
+    }))
+}
+
+/// Convert video using macOS built-in avconvert.
+/// preset: "high" | "medium" | "low" (maps to avconvert presets)
+/// start_sec / duration_sec: optional trim (0.0 means no trim)
+#[tauri::command]
+pub async fn convert_to_mp4(
+    src_path: String,
+    preset: Option<String>,
+    start_sec: Option<f64>,
+    duration_sec: Option<f64>,
+) -> Result<String, String> {
+    let dst_path = src_path
+        .replace(".mov", "_converted.mp4")
+        .replace(".MOV", "_converted.mp4");
+
+    #[cfg(target_os = "macos")]
+    {
+        let avconvert_preset = match preset.as_deref().unwrap_or("high") {
+            "low"    => "Preset1280x720",
+            "medium" => "Preset1920x1080",
+            _        => "PresetHighestQuality",
+        };
+
+        let mut args = vec![
+            "-s".to_string(), src_path.clone(),
+            "-o".to_string(), dst_path.clone(),
+            "-p".to_string(), avconvert_preset.to_string(),
+            "--replace".to_string(),
+        ];
+
+        if let Some(start) = start_sec.filter(|&s| s > 0.0) {
+            args.push("--start".to_string());
+            args.push(start.to_string());
+        }
+        if let Some(dur) = duration_sec.filter(|&d| d > 0.0) {
+            args.push("--duration".to_string());
+            args.push(dur.to_string());
+        }
+
+        let output = tokio::process::Command::new("avconvert")
+            .args(&args)
+            .output()
+            .await
+            .map_err(|e| format!("avconvert failed: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Conversion failed: {}", stderr));
+        }
+        return Ok(dst_path);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    Err("Conversion not yet supported on this platform".into())
+}
+
+/// Upload video file to download.ru
+#[tauri::command]
+pub async fn upload_video_to_download(
+    file_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let token = {
+        let t = state.access_token.lock().unwrap();
+        t.clone().ok_or("No access token. Please login in settings.")?
+    };
+
+    let file_bytes = std::fs::read(&file_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let filename = std::path::Path::new(&file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("recording.mov")
+        .to_string();
+
+    let mime = if filename.ends_with(".mp4") { "video/mp4" } else { "video/quicktime" };
+
+    let client = reqwest::Client::new();
+
+    // Get .screenshots folder id (reuse existing logic)
+    let parent_id = crate::commands::upload::get_or_create_screenshots_folder_pub(&client, &token).await?;
+
+    let file_part = reqwest::multipart::Part::bytes(file_bytes)
+        .file_name(filename)
+        .mime_str(mime)
+        .map_err(|e| format!("MIME error: {}", e))?;
+
+    let form = reqwest::multipart::Form::new().part("files[]", file_part);
+
+    let url = format!("https://download.ru/fast_upload?parent_id={}", parent_id);
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/json")
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return Err(format!("Upload failed {}: {}", status, body));
+    }
+
+    // Parse secure_url from response
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Parse error: {}: {}", e, &body[..body.len().min(200)]))?;
+
+    let secure_url = json["object"]["secure_url"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    let url = if secure_url.starts_with('/') {
+        format!("https://download.ru{}", secure_url)
+    } else {
+        secure_url
+    };
+
+    Ok(url)
+}
+
 /// Move recorded video file to destination chosen by user
 #[tauri::command]
 pub fn move_recording(src_path: String, dst_path: String) -> Result<(), String> {
@@ -186,6 +320,30 @@ pub fn move_recording(src_path: String, dst_path: String) -> Result<(), String> 
             let _ = std::fs::remove_file(&src_path);
         }))
         .map_err(|e| format!("Failed to move file: {}", e))
+}
+
+fn open_video_result_window(app: &AppHandle, _path: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+
+    if let Some(w) = app.get_webview_window("video-result") {
+        let _ = w.destroy();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    WebviewWindowBuilder::new(
+        app,
+        "video-result",
+        WebviewUrl::App("index.html#/video-result".into()),
+    )
+    .title("Запись завершена")
+    .inner_size(560.0, 480.0)
+    .resizable(true)
+    .center()
+    .build()
+    .map_err(|e| format!("Failed to open video result: {}", e))?;
+
+    Ok(())
 }
 
 fn show_recording_window(app: &AppHandle) -> Result<(), String> {

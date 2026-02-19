@@ -2,6 +2,7 @@ mod commands;
 mod state;
 mod upload;
 
+use std::io::{Read, Seek, SeekFrom};
 use tauri::{AppHandle, Manager};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
@@ -12,6 +13,48 @@ use state::AppState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Custom protocol to serve local video files with byte-range support
+        .register_uri_scheme_protocol("localfile", |_app, req| {
+            let path = req.uri().path().to_string();
+            let file_path = percent_decode(&path);
+
+            let mime = if file_path.ends_with(".mp4") { "video/mp4" }
+                       else if file_path.ends_with(".mov") || file_path.ends_with(".MOV") { "video/quicktime" }
+                       else { "application/octet-stream" };
+
+            let mut file = match std::fs::File::open(&file_path) {
+                Ok(f) => f,
+                Err(_) => return tauri::http::Response::builder()
+                    .status(404).body(vec![]).unwrap(),
+            };
+            let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+
+            // Handle Range header for video seeking
+            if let Some(range_val) = req.headers().get("range") {
+                let range_str = range_val.to_str().unwrap_or("bytes=0-");
+                let (start, end) = parse_byte_range(range_str, file_size);
+                let length = end - start + 1;
+                let mut buf = vec![0u8; length as usize];
+                let _ = file.seek(SeekFrom::Start(start));
+                let _ = file.read_exact(&mut buf);
+                return tauri::http::Response::builder()
+                    .status(206)
+                    .header("Content-Range", format!("bytes {}-{}/{}", start, end, file_size))
+                    .header("Content-Length", length.to_string())
+                    .header("Accept-Ranges", "bytes")
+                    .header("Content-Type", mime)
+                    .body(buf).unwrap();
+            }
+
+            let mut buf = Vec::new();
+            let _ = file.read_to_end(&mut buf);
+            tauri::http::Response::builder()
+                .status(200)
+                .header("Content-Length", file_size.to_string())
+                .header("Accept-Ranges", "bytes")
+                .header("Content-Type", mime)
+                .body(buf).unwrap()
+        })
         .plugin(tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, shortcut, event| {
                 if event.state == ShortcutState::Pressed {
@@ -58,7 +101,8 @@ pub fn run() {
                             let _ = commands::screenshot::capture_window_and_edit(app_handle.clone());
                         }
                         "video_record" => {
-                            let _ = commands::recording::start_video_capture(app_handle.clone());
+                            let state = app_handle.state::<AppState>();
+                            let _ = commands::recording::start_video_capture(app_handle.clone(), state);
                         }
                         _ => {}
                     }
@@ -82,7 +126,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let label = window.label();
-                if label == "main" || label == "editor" {
+                if label == "main" || label == "editor" || label == "video-result" {
                     window.hide().unwrap();
                     api.prevent_close();
                     // Hide from Dock and Cmd+Tab when no windows are visible
@@ -114,9 +158,42 @@ pub fn run() {
             commands::recording::stop_video_recording,
             commands::recording::is_recording,
             commands::recording::move_recording,
+            commands::recording::get_video_info,
+            commands::recording::get_last_recording_path,
+            commands::recording::convert_to_mp4,
+            commands::recording::upload_video_to_download,
+            commands::recording::delete_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn percent_decode(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let h1 = chars.next().unwrap_or(b'0') as char;
+            let h2 = chars.next().unwrap_or(b'0') as char;
+            if let Ok(byte) = u8::from_str_radix(&format!("{}{}", h1, h2), 16) {
+                result.push(byte as char);
+            }
+        } else {
+            result.push(b as char);
+        }
+    }
+    result
+}
+
+fn parse_byte_range(range: &str, file_size: u64) -> (u64, u64) {
+    // Format: "bytes=start-end" or "bytes=start-"
+    let range = range.trim_start_matches("bytes=");
+    let mut parts = range.splitn(2, '-');
+    let start: u64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let end: u64 = parts.next()
+        .and_then(|s| if s.is_empty() { None } else { s.parse().ok() })
+        .unwrap_or(file_size.saturating_sub(1));
+    (start, end.min(file_size.saturating_sub(1)))
 }
 
 fn show_settings_window(app: &AppHandle) {

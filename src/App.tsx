@@ -3,6 +3,7 @@ import MainPage from "./pages/MainPage";
 import OverlayPage from "./pages/OverlayPage";
 import EditorPage from "./pages/EditorPage";
 import RecordingPage from "./pages/RecordingPage";
+import VideoResultPage from "./pages/VideoResultPage";
 import "./App.css";
 
 function App() {
@@ -30,6 +31,8 @@ function App() {
       return <EditorPage />;
     case "/recording":
       return <RecordingPage />;
+    case "/video-result":
+      return <VideoResultPage />;
     default:
       return <MainPage />;
   }

@@ -1,7 +1,5 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 
 function RecordingPage() {
   const [stopping, setStopping] = useState(false);
@@ -9,20 +7,11 @@ function RecordingPage() {
   const handleStop = async () => {
     setStopping(true);
     try {
-      const filePath = await invoke<string>("stop_video_recording");
-      // Ask where to save
-      const savePath = await save({
-        defaultPath: `recording_${Date.now()}.mov`,
-        filters: [{ name: "Video", extensions: ["mov"] }],
-      });
-      if (savePath && filePath) {
-        await invoke("move_recording", { srcPath: filePath, dstPath: savePath });
-      }
+      await invoke("stop_video_recording");
+      // VideoResultPage opens automatically after stop
     } catch (err) {
       console.error("Stop recording error:", err);
-      // Still close the window
-      const win = getCurrentWindow();
-      await win.close();
+      setStopping(false);
     }
   };
 
@@ -47,7 +36,7 @@ function RecordingPage() {
         flexShrink: 0,
       }} />
       <span style={{ color: "#fff", fontSize: 13, fontWeight: 500, flex: 1 }}>
-        {stopping ? "Сохранение..." : "Запись..."}
+        {stopping ? "Завершение..." : "Запись..."}
       </span>
       <button
         onClick={handleStop}
@@ -67,10 +56,7 @@ function RecordingPage() {
         Стоп
       </button>
       <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
-        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body, #root { height: 100%; }
       `}</style>
