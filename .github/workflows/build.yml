@@ -9,6 +9,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -86,9 +89,11 @@ jobs:
           path: artifacts
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
-          draft: true
+          draft: false
+          prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') || contains(github.ref, 'rc') }}
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
