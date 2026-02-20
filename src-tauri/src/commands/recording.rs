@@ -1,71 +1,200 @@
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use crate::state::AppState;
 
-/// Start video capture using native macOS UI (screencapture -v).
+/// Shared helper: launch screencapture with given args, monitor process, show result on exit.
+#[cfg(target_os = "macos")]
+fn launch_screencapture(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    args: &[&str],
+    output_path: &str,
+) -> Result<(), String> {
+    let mut child = std::process::Command::new("screencapture")
+        .args(args)
+        .spawn()
+        .map_err(|e| format!("Failed to start screencapture: {}", e))?;
+
+    // Store PID so stop_video_recording can kill the process
+    {
+        let mut pid = state.recording_pid.lock().unwrap();
+        *pid = Some(child.id());
+    }
+    {
+        let mut path = state.recording_path.lock().unwrap();
+        *path = Some(output_path.to_string());
+    }
+    {
+        let mut last = state.last_recording_path.lock().unwrap();
+        *last = Some(output_path.to_string());
+    }
+
+    // Show our Stop button while recording
+    show_recording_window(app)?;
+
+    // Monitor process in background — show result window when screencapture exits
+    let app_clone = app.clone();
+    let recording_path = output_path.to_string();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let state = app_clone.state::<AppState>();
+
+        { let mut p = state.recording_pid.lock().unwrap(); *p = None; }
+        { let mut p = state.recording_path.lock().unwrap(); *p = None; }
+
+        if std::fs::metadata(&recording_path).is_ok() {
+            { let mut l = state.last_recording_path.lock().unwrap(); *l = Some(recording_path.clone()); }
+            let _ = open_video_result_window(&app_clone, &recording_path);
+        } else {
+            eprintln!("Recording cancelled — no file created");
+            let mut l = state.last_recording_path.lock().unwrap();
+            *l = None;
+        }
+    });
+
+    Ok(())
+}
+
+fn make_output_path() -> String {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    format!("/tmp/recording_{}.mov", timestamp)
+}
+
+/// Start full-screen video capture using native macOS UI (screencapture -v).
 /// Opens the same picker as Cmd+Shift+5 — user selects area/window/screen.
-/// User stops recording via macOS menu bar stop button.
-/// When screencapture exits, we automatically show the result window.
 #[tauri::command]
 pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let output_path = format!("/tmp/recording_{}.mov", timestamp);
-
-        let mut child = std::process::Command::new("screencapture")
-            .args(["-v", &output_path])
-            .spawn()
-            .map_err(|e| format!("Failed to start screencapture: {}", e))?;
-
-        // Store PID so stop_video_recording can kill the process
-        {
-            let mut pid = state.recording_pid.lock().unwrap();
-            *pid = Some(child.id());
-        }
-        {
-            let mut path = state.recording_path.lock().unwrap();
-            *path = Some(output_path.clone());
-        }
-        {
-            let mut last = state.last_recording_path.lock().unwrap();
-            *last = Some(output_path.clone());
-        }
-
-        // Monitor process in background — when screencapture exits, show result
-        let app_clone = app.clone();
-        let recording_path = output_path.clone();
-        // Show our Stop button while recording
-        show_recording_window(&app)?;
-
-        // Monitor process in background — show result window when screencapture exits
-        std::thread::spawn(move || {
-            let _ = child.wait();
-            std::thread::sleep(std::time::Duration::from_millis(500));
-
-            let state = app_clone.state::<AppState>();
-
-            { let mut p = state.recording_pid.lock().unwrap(); *p = None; }
-            { let mut p = state.recording_path.lock().unwrap(); *p = None; }
-
-            if std::fs::metadata(&recording_path).is_ok() {
-                { let mut l = state.last_recording_path.lock().unwrap(); *l = Some(recording_path.clone()); }
-                let _ = open_video_result_window(&app_clone, &recording_path);
-            } else {
-                eprintln!("Recording cancelled — no file created");
-                let mut l = state.last_recording_path.lock().unwrap();
-                *l = None;
-            }
-        });
+        let output_path = make_output_path();
+        launch_screencapture(&app, &state, &["-v", &output_path], &output_path)?;
         return Ok(());
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = app;
+        let _ = (app, state);
         Err("Video recording not yet implemented on this platform. See VIDEO_RECORDING.md".into())
+    }
+}
+
+/// Start region video recording via screencapture -v -R x,y,w,h.
+/// Coordinates come from the overlay (CSS pixels); screen_offset is added to convert to screen points.
+/// A 300ms delay is added before starting so the overlay has time to close.
+#[tauri::command]
+pub fn start_video_recording(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let (offset_x, offset_y) = {
+            let offset = state.screen_offset.lock().unwrap();
+            offset.unwrap_or((0, 0))
+        };
+
+        let screen_x = x + offset_x;
+        let screen_y = y + offset_y;
+        let rect_arg = format!("{},{},{},{}", screen_x, screen_y, width, height);
+        let output_path = make_output_path();
+
+        // Delay so the overlay window has time to close
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        launch_screencapture(&app, &state, &["-v", "-R", &rect_arg, &output_path], &output_path)?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // TODO: Linux — ffmpeg -video_size WxH -framerate 30 -f x11grab -i :0.0+X,Y output.mp4
+        // TODO: Windows — ffmpeg -f gdigrab -offset_x X -offset_y Y -video_size WxH -i desktop output.mp4
+        let _ = (app, state, x, y, width, height);
+        Err("Region video recording not yet implemented on this platform. See VIDEO_RECORDING.md".into())
+    }
+}
+
+/// Show a native window picker via osascript/JXA, return CGWindowID.
+/// Returns None if user cancelled.
+#[cfg(target_os = "macos")]
+fn pick_window_id() -> Result<Option<u32>, String> {
+    let script = r#"
+ObjC.import("CoreGraphics");
+var opts = 1 | 16;
+var windowList = ObjC.castRefToObject($.CGWindowListCopyWindowInfo(opts, 0));
+var choices = [];
+var idMap = {};
+for (var i = 0; i < windowList.count; i++) {
+    var w = windowList.objectAtIndex(i);
+    var layer = ObjC.unwrap(w.objectForKey("kCGWindowLayer"));
+    if (layer === 0) {
+        var owner = ObjC.unwrap(w.objectForKey("kCGWindowOwnerName")) || "?";
+        var nameRef = w.objectForKey("kCGWindowName");
+        var name = nameRef ? ObjC.unwrap(nameRef) : "";
+        var wid = ObjC.unwrap(w.objectForKey("kCGWindowNumber"));
+        if (name && name.length > 0) {
+            var label = owner + ": " + name;
+            choices.push(label);
+            idMap[label] = wid;
+        }
+    }
+}
+if (choices.length === 0) { ""; }
+else {
+    var app = Application.currentApplication();
+    app.includeStandardAdditions = true;
+    var chosen = app.chooseFromList(choices, {
+        withPrompt: "Выберите окно для записи:",
+        defaultItems: [choices[0]]
+    });
+    if (chosen && chosen.length > 0) { "" + idMap[chosen[0]]; }
+    else { ""; }
+}
+"#;
+
+    let output = std::process::Command::new("osascript")
+        .args(["-l", "JavaScript", "-e", script])
+        .output()
+        .map_err(|e| format!("Failed to run window picker: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        return Ok(None); // user cancelled
+    }
+    let wid: u32 = stdout.parse()
+        .map_err(|_| format!("Invalid window ID from picker: {}", stdout))?;
+    Ok(Some(wid))
+}
+
+/// Start window video recording: shows native window picker, then records via screencapture -v -l <windowID>.
+#[tauri::command]
+pub fn start_video_capture_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let window_id = pick_window_id()?;
+        let wid = match window_id {
+            Some(id) => id,
+            None => return Ok(()), // user cancelled
+        };
+        let wid_str = wid.to_string();
+        let output_path = make_output_path();
+        launch_screencapture(&app, &state, &["-v", "-l", &wid_str, &output_path], &output_path)?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // TODO: Linux/Windows — window selection not yet implemented
+        let _ = (app, state);
+        Err("Window video recording not yet implemented on this platform. See VIDEO_RECORDING.md".into())
     }
 }
 
@@ -127,7 +256,7 @@ pub fn stop_video_recording(
 /// Check if recording is in progress
 #[tauri::command]
 pub fn is_recording(state: State<'_, AppState>) -> bool {
-    state.recording_process.lock().unwrap().is_some()
+    state.recording_pid.lock().unwrap().is_some()
 }
 
 /// Get path of the last recording (stored temporarily after stop)

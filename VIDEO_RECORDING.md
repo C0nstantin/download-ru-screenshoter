@@ -78,23 +78,45 @@ windows = { version = "0.58", features = ["Graphics_Capture", ...] }
 
 ---
 
-## Общая архитектура (уже готова)
+## Режимы записи на macOS
+
+На macOS реализованы три режима записи видео через нативную утилиту `screencapture`:
+
+### 1. Запись экрана (полноэкранная)
+- Трей: «Запись экрана»
+- Команда: `start_video_capture` → `screencapture -v file.mov`
+- Открывается нативный пикер Cmd+Shift+5 — пользователь выбирает экран/область/окно
+
+### 2. Запись области
+- Трей: «Запись области»
+- Открывает overlay (`start_region_capture_overlay_video`) для выбора области
+- Пользователь выделяет прямоугольник, подтверждает Enter / двойной клик
+- Команда: `start_video_recording(x, y, w, h)` → `screencapture -v -R x,y,w,h file.mov`
+- Координаты из overlay (CSS pixels) + `screen_offset` → screen points
+
+### 3. Запись окна
+- Трей: «Запись окна»
+- Показывает нативный диалог выбора окна (через `osascript`/JXA + `CGWindowListCopyWindowInfo`)
+- Команда: `start_video_capture_window` → `screencapture -v -l <windowID> file.mov`
+- Флаг `-v -w` не поддерживается macOS, поэтому используется `-l <windowID>` для записи конкретного окна
+
+## Общая архитектура
 
 ```
-start_video_capture()          // открывает overlay с mode=video
-    ↓
-OverlayPage (mode=video)       // пользователь выделяет область
-    ↓
-start_video_recording(x,y,w,h) // запускает запись (сейчас: screencapture на macOS)
-    ↓
-RecordingPage                  // индикатор "REC" + кнопка "Стоп"
-    ↓
-stop_video_recording()         // останавливает процесс, возвращает путь
-    ↓
-move_recording(src, dst)       // сохраняет файл в нужное место
+[Запись экрана]     → start_video_capture()           → screencapture -v
+[Запись области]    → overlay → start_video_recording(x,y,w,h) → screencapture -v -R
+[Запись окна]       → pick_window_id() → start_video_capture_window() → screencapture -v -l <wid>
+                            ↓
+                    RecordingPage (индикатор "REC" + кнопка "Стоп")
+                            ↓
+                    stop_video_recording() → путь к файлу
+                            ↓
+                    VideoResultPage (превью, трим, конвертация, загрузка)
 ```
 
-Добавить платформенный код только в `start_video_recording()` в `recording.rs`.
+Все три команды используют общий хелпер `launch_screencapture(args)` в `recording.rs`.
+
+Для Linux/Windows — TODO заглушки в `start_video_recording()` и `start_video_capture_window()`.
 
 ---
 

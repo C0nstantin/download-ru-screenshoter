@@ -25,6 +25,8 @@ function App() {
   switch (route) {
     case "/overlay":
       return <OverlayPage mode="screenshot" />;
+    case "/overlay-video":
+      return <OverlayPage mode="video" />;
     case "/editor":
       return <EditorPage />;
     case "/recording":

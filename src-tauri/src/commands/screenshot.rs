@@ -287,23 +287,35 @@ pub fn start_region_capture_overlay_video(app: AppHandle) -> Result<(), String> 
     }
     if captures.is_empty() { return Err("Failed to capture any screen".into()); }
 
-    let mut min_x = i32::MAX; let mut min_y = i32::MAX;
-    let mut max_x = i32::MIN; let mut max_y = i32::MIN;
+    // Physical pixel bounding box (for image compositing)
+    let mut phys_min_x = i32::MAX; let mut phys_min_y = i32::MAX;
+    let mut phys_max_x = i32::MIN; let mut phys_max_y = i32::MIN;
+    // Logical coordinate bounding box (for window position and screen_offset)
+    let mut log_min_x = i32::MAX; let mut log_min_y = i32::MAX;
+    let mut log_max_x = i32::MIN; let mut log_max_y = i32::MIN;
+
     for (img, x, y, scale) in &captures {
+        // Physical pixels for image compositing
         let px = (*x as f32 * scale) as i32;
         let py = (*y as f32 * scale) as i32;
-        min_x = min_x.min(px); min_y = min_y.min(py);
-        max_x = max_x.max(px + img.width() as i32);
-        max_y = max_y.max(py + img.height() as i32);
+        phys_min_x = phys_min_x.min(px); phys_min_y = phys_min_y.min(py);
+        phys_max_x = phys_max_x.max(px + img.width() as i32);
+        phys_max_y = phys_max_y.max(py + img.height() as i32);
+        // Logical coordinates for window positioning
+        log_min_x = log_min_x.min(*x); log_min_y = log_min_y.min(*y);
+        log_max_x = log_max_x.max(*x + (img.width() as f32 / scale) as i32);
+        log_max_y = log_max_y.max(*y + (img.height() as f32 / scale) as i32);
     }
-    let total_width = (max_x - min_x) as u32;
-    let total_height = (max_y - min_y) as u32;
+    let total_width = (phys_max_x - phys_min_x) as u32;
+    let total_height = (phys_max_y - phys_min_y) as u32;
+    let logical_width = (log_max_x - log_min_x) as f64;
+    let logical_height = (log_max_y - log_min_y) as f64;
 
     let mut combined = screenshots::image::RgbaImage::new(total_width, total_height);
     for (img, x, y, scale) in &captures {
         let px = (*x as f32 * scale) as i32;
         let py = (*y as f32 * scale) as i32;
-        let ox = (px - min_x) as u32; let oy = (py - min_y) as u32;
+        let ox = (px - phys_min_x) as u32; let oy = (py - phys_min_y) as u32;
         for qy in 0..img.height() {
             for qx in 0..img.width() {
                 let pixel = img.get_pixel(qx, qy);
@@ -320,7 +332,8 @@ pub fn start_region_capture_overlay_video(app: AppHandle) -> Result<(), String> 
     combined.write_to(&mut cursor, ImageFormat::Png)
         .map_err(|e| format!("PNG encode error: {}", e))?;
 
-    { let mut o = state.screen_offset.lock().unwrap(); *o = Some((min_x, min_y)); }
+    // Store logical offset — used by start_video_recording to translate CSS coords to screen coords
+    { let mut o = state.screen_offset.lock().unwrap(); *o = Some((log_min_x, log_min_y)); }
     { let mut s = state.current_screenshot.lock().unwrap(); *s = Some(png_bytes); }
     { let mut d = state.screenshot_dimensions.lock().unwrap(); *d = Some((w, h)); }
 
@@ -333,8 +346,8 @@ pub fn start_region_capture_overlay_video(app: AppHandle) -> Result<(), String> 
         &app, "overlay",
         tauri::WebviewUrl::App("index.html#/overlay-video".into()),
     )
-    .position(min_x as f64, min_y as f64)
-    .inner_size(total_width as f64, total_height as f64)
+    .position(log_min_x as f64, log_min_y as f64)
+    .inner_size(logical_width, logical_height)
     .always_on_top(true).skip_taskbar(true).decorations(false).focused(true)
     .build()
     .map_err(|e| format!("Failed to create video overlay: {}", e))?;
