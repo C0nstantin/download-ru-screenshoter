@@ -17,7 +17,7 @@ pub fn activate_as_regular(app: &AppHandle) {
     unsafe {
         use cocoa::appkit::NSApplication;
         let ns_app = cocoa::appkit::NSApp();
-        ns_app.activateIgnoringOtherApps_(true);
+        ns_app.activateIgnoringOtherApps_(objc::runtime::YES);
     }
 }
 
