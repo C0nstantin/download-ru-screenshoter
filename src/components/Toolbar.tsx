@@ -1,7 +1,14 @@
+import { ReactNode } from "react";
 import { useEditorStore, Tool } from "../stores/editorStore";
 
-const tools: { id: Tool; label: string; icon: string }[] = [
-  { id: "select", label: "Выбор", icon: "↖" },
+const CursorIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path d="M3 1L3 12L6.5 8.5L10 14L12 13L8.5 7L13 7L3 1Z" />
+  </svg>
+);
+
+const tools: { id: Tool; label: string; icon: ReactNode }[] = [
+  { id: "select", label: "Выбор", icon: <CursorIcon /> },
   { id: "arrow", label: "Стрелка", icon: "→" },
   { id: "rect", label: "Рамка", icon: "□" },
   { id: "text", label: "Текст", icon: "T" },

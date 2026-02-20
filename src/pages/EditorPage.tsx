@@ -149,6 +149,7 @@ function EditorPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<UploadResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [scale, setScale] = useState<number | null>(null); // null = not calculated yet
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -599,6 +600,8 @@ function EditorPage() {
       }
       await writeImage(bytes);
       setError(null);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
       let permissionGranted = await isPermissionGranted();
       if (!permissionGranted) {
         const permission = await requestPermission();
@@ -848,7 +851,7 @@ function EditorPage() {
           </button>
         </div>
         <button onClick={handleCopyImage} title="Копировать изображение в буфер">
-          Копировать
+          {copied ? "Скопировано ✓" : "Копировать"}
         </button>
         <button onClick={handleSave}>Сохранить</button>
         <button

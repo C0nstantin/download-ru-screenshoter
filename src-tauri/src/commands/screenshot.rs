@@ -469,7 +469,14 @@ pub fn capture_fullscreen_and_edit_internal(app: AppHandle, display_id: Option<u
         return Err("No screens found".to_string());
     }
 
-    let (png_bytes, width, height) = if let Some(id) = display_id {
+    // If no specific display and only one screen, just capture it directly (fast path)
+    let effective_display_id = if display_id.is_none() && screens.len() == 1 {
+        Some(screens[0].display_info.id)
+    } else {
+        display_id
+    };
+
+    let (png_bytes, width, height) = if let Some(id) = effective_display_id {
         // Capture specific display
         let screen = screens.iter()
             .find(|s| s.display_info.id == id)
@@ -531,16 +538,8 @@ pub fn capture_fullscreen_and_edit_internal(app: AppHandle, display_id: Option<u
             let offset_x = (phys_x - min_x) as u32;
             let offset_y = (phys_y - min_y) as u32;
 
-            for py in 0..img.height() {
-                for px in 0..img.width() {
-                    let pixel = img.get_pixel(px, py);
-                    let dest_x = offset_x + px;
-                    let dest_y = offset_y + py;
-                    if dest_x < total_width && dest_y < total_height {
-                        combined.put_pixel(dest_x, dest_y, *pixel);
-                    }
-                }
-            }
+            use screenshots::image::GenericImage;
+            let _ = combined.copy_from(&*img, offset_x, offset_y);
         }
 
         let (w, h) = (combined.width(), combined.height());
@@ -710,7 +709,7 @@ fn create_editor_window(app: &AppHandle, width: u32, height: u32) -> Result<(), 
     println!("Creating editor window for image {}x{}", width, height);
     // Show in Dock and Cmd+Tab when editor opens
     #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    crate::activate_as_regular(app);
 
     // Calculate window size - add padding for toolbar and actions
     let win_width = ((width as f64 * 0.8) + 100.0).min(1400.0).max(600.0);

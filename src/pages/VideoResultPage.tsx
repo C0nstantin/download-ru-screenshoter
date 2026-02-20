@@ -34,6 +34,7 @@ function VideoResultPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadUrl, setUploadUrl] = useState("");
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -229,7 +230,9 @@ function VideoResultPage() {
           <span style={{ color: "#4ade80", fontSize: 11, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {uploadUrl}
           </span>
-          <button onClick={() => writeText(uploadUrl)} style={btnSm}>Копировать</button>
+          <button onClick={() => { writeText(uploadUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }} style={btnSm}>
+            {copied ? "Скопировано ✓" : "Копировать"}
+          </button>
         </div>
       )}
 

@@ -46,6 +46,10 @@ dirs = "6"
 thiserror = "2"
 display-info = "0.4"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+cocoa = "0.26"
+
 [features]
 
 

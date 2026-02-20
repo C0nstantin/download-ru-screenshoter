@@ -10,6 +10,17 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use state::AppState;
 
+/// Activate app in Dock and Cmd+Tab (Accessory→Regular requires NSApp.activate).
+#[cfg(target_os = "macos")]
+pub fn activate_as_regular(app: &AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    unsafe {
+        use cocoa::appkit::NSApplication;
+        let ns_app = cocoa::appkit::NSApp();
+        ns_app.activateIgnoringOtherApps_(true);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -20,11 +31,14 @@ pub fn run() {
 
             // Security: only allow video files from /tmp/recording_* (our own recordings)
             let canonical = std::path::Path::new(&file_path);
-            let is_allowed = canonical.starts_with("/tmp/recording_")
+            let filename = canonical.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let is_allowed = canonical.parent() == Some(std::path::Path::new("/tmp"))
+                && filename.starts_with("recording_")
                 && matches!(
                     canonical.extension().and_then(|e| e.to_str()),
                     Some("mov" | "mp4" | "MOV" | "MP4")
-                );
+                )
+                && !file_path.contains("..");
             if !is_allowed {
                 eprintln!("localfile:// blocked path: {}", file_path);
                 return tauri::http::Response::builder()
@@ -165,9 +179,8 @@ pub fn run() {
                     }
                 }
                 tauri::WindowEvent::Focused(true) => {
-                    // Any window got focus → show in Dock and Cmd+Tab
                     #[cfg(target_os = "macos")]
-                    let _ = window.app_handle().set_activation_policy(tauri::ActivationPolicy::Regular);
+                    activate_as_regular(window.app_handle());
                 }
                 tauri::WindowEvent::Destroyed => {
                     #[cfg(target_os = "macos")]
@@ -242,9 +255,7 @@ fn parse_byte_range(range: &str, file_size: u64) -> (u64, u64) {
 
 fn show_settings_window(app: &AppHandle) {
     #[cfg(target_os = "macos")]
-    {
-        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-    }
+    activate_as_regular(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();

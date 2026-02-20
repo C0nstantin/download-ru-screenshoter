@@ -5,17 +5,12 @@ use crate::state::AppState;
 /// Prevents path traversal attacks from frontend.
 fn validate_recording_path(path: &str) -> Result<(), String> {
     let p = std::path::Path::new(path);
-    // Must be in /tmp and be a recording_*.mov/mp4 or *_converted.mp4
     let filename = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let in_tmp = p.starts_with("/tmp");
+    let in_tmp = p.parent() == Some(std::path::Path::new("/tmp"));
     let is_recording = filename.starts_with("recording_")
         && (filename.ends_with(".mov") || filename.ends_with(".mp4"));
-    if !in_tmp || !is_recording {
+    if !in_tmp || !is_recording || path.contains("..") {
         return Err(format!("Access denied: path not allowed: {}", path));
-    }
-    // Prevent path traversal via .. components
-    if path.contains("..") {
-        return Err("Access denied: path traversal detected".into());
     }
     Ok(())
 }
@@ -465,7 +460,7 @@ pub fn move_recording(src_path: String, dst_path: String) -> Result<(), String> 
 
 fn open_video_result_window(app: &AppHandle, _path: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    crate::activate_as_regular(app);
 
     if let Some(w) = app.get_webview_window("video-result") {
         let _ = w.destroy();
@@ -546,7 +541,7 @@ pub fn is_mic_muted(state: State<'_, AppState>) -> bool {
 fn show_recording_window(app: &AppHandle) -> Result<(), String> {
     // Show in Dock while recording
     #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    crate::activate_as_regular(app);
 
     let win = WebviewWindowBuilder::new(
         app,
