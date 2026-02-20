@@ -69,57 +69,6 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
     }
 }
 
-/// Start recording the selected region (called from overlay after region selection)
-#[tauri::command]
-pub fn start_video_recording(
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let output_path = format!("/tmp/recording_{}.mov", timestamp);
-
-        // screencapture -v -R x,y,w,h output.mov
-        let child = std::process::Command::new("screencapture")
-            .args([
-                "-v",
-                &format!("-R{},{},{},{}", x, y, width, height),
-                &output_path,
-            ])
-            .spawn()
-            .map_err(|e| format!("Failed to start screencapture: {}", e))?;
-
-        {
-            let mut proc = state.recording_process.lock().unwrap();
-            *proc = Some(child);
-        }
-        {
-            let mut path = state.recording_path.lock().unwrap();
-            *path = Some(output_path);
-        }
-
-        // Show recording indicator window
-        show_recording_window(&app)?;
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        // TODO: Linux/Windows — see VIDEO_RECORDING.md
-        let _ = (x, y, width, height);
-        let _ = app;
-        return Err("Video recording not yet implemented on this platform. See VIDEO_RECORDING.md".into());
-    }
-
-    Ok(())
-}
 
 /// Stop recording, return path to the .mov file
 #[tauri::command]

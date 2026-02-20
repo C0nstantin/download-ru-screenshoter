@@ -76,7 +76,7 @@ pub fn run() {
             let snap_i = MenuItem::with_id(&handle, "screenshot", "Скриншот области (Ctrl+Shift+4)", true, None::<&str>)?;
             let snap_full_i = MenuItem::with_id(&handle, "screenshot_full", "Скриншот экрана (Ctrl+Shift+3)", true, None::<&str>)?;
             let snap_win_i = MenuItem::with_id(&handle, "screenshot_window", "Скриншот окна (Ctrl+Shift+Alt+3)", true, None::<&str>)?;
-            let video_i = MenuItem::with_id(&handle, "video_record", "Запись видео (Ctrl+Shift+5)", true, None::<&str>)?;
+            let video_i = MenuItem::with_id(&handle, "video_record", "Запись видео", true, None::<&str>)?;
             let settings_i = MenuItem::with_id(&handle, "settings", "Настройки...", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(&handle, "quit", "Выйти", true, None::<&str>)?;
 
@@ -154,7 +154,6 @@ pub fn run() {
             commands::hotkeys::set_hotkeys,
             commands::settings::open_system_settings,
             commands::recording::start_video_capture,
-            commands::recording::start_video_recording,
             commands::recording::stop_video_recording,
             commands::recording::is_recording,
             commands::recording::move_recording,

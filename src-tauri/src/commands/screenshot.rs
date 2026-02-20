@@ -271,8 +271,77 @@ fn start_region_capture_macos(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Linux/Windows: Use custom overlay for region selection
-#[cfg(not(target_os = "macos"))]
+/// Same as start_region_capture_overlay but opens overlay in video selection mode
+pub fn start_region_capture_overlay_video(app: AppHandle) -> Result<(), String> {
+    // Reuse all the screen capture + composite logic, just change the overlay URL
+    let state = app.state::<AppState>();
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+    if screens.is_empty() { return Err("No screens found".into()); }
+
+    let mut captures: Vec<(screenshots::image::RgbaImage, i32, i32, f32)> = Vec::new();
+    for screen in &screens {
+        let info = &screen.display_info;
+        if let Ok(img) = screen.capture() {
+            captures.push((img, info.x, info.y, info.scale_factor));
+        }
+    }
+    if captures.is_empty() { return Err("Failed to capture any screen".into()); }
+
+    let mut min_x = i32::MAX; let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN; let mut max_y = i32::MIN;
+    for (img, x, y, scale) in &captures {
+        let px = (*x as f32 * scale) as i32;
+        let py = (*y as f32 * scale) as i32;
+        min_x = min_x.min(px); min_y = min_y.min(py);
+        max_x = max_x.max(px + img.width() as i32);
+        max_y = max_y.max(py + img.height() as i32);
+    }
+    let total_width = (max_x - min_x) as u32;
+    let total_height = (max_y - min_y) as u32;
+
+    let mut combined = screenshots::image::RgbaImage::new(total_width, total_height);
+    for (img, x, y, scale) in &captures {
+        let px = (*x as f32 * scale) as i32;
+        let py = (*y as f32 * scale) as i32;
+        let ox = (px - min_x) as u32; let oy = (py - min_y) as u32;
+        for qy in 0..img.height() {
+            for qx in 0..img.width() {
+                let pixel = img.get_pixel(qx, qy);
+                if ox + qx < total_width && oy + qy < total_height {
+                    combined.put_pixel(ox + qx, oy + qy, *pixel);
+                }
+            }
+        }
+    }
+
+    let (w, h) = (combined.width(), combined.height());
+    let mut png_bytes = Vec::new();
+    let mut cursor = Cursor::new(&mut png_bytes);
+    combined.write_to(&mut cursor, ImageFormat::Png)
+        .map_err(|e| format!("PNG encode error: {}", e))?;
+
+    { let mut o = state.screen_offset.lock().unwrap(); *o = Some((min_x, min_y)); }
+    { let mut s = state.current_screenshot.lock().unwrap(); *s = Some(png_bytes); }
+    { let mut d = state.screenshot_dimensions.lock().unwrap(); *d = Some((w, h)); }
+
+    if let Some(existing) = app.get_webview_window("overlay") {
+        let _ = existing.destroy();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        &app, "overlay",
+        tauri::WebviewUrl::App("index.html#/overlay-video".into()),
+    )
+    .position(min_x as f64, min_y as f64)
+    .inner_size(total_width as f64, total_height as f64)
+    .always_on_top(true).skip_taskbar(true).decorations(false).focused(true)
+    .build()
+    .map_err(|e| format!("Failed to create video overlay: {}", e))?;
+
+    Ok(())
+}
+
 pub fn start_region_capture_overlay(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
