@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { sendNotification, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
@@ -79,19 +80,47 @@ function VideoResultPage() {
     }
   };
 
+  const doUpload = async () => {
+    if (!info) return;
+    const url = await invoke<string>("upload_video_to_download", { filePath: info.path });
+    setUploadUrl(url);
+    await writeText(url);
+    let ok = await isPermissionGranted();
+    if (!ok) { const p = await requestPermission(); ok = p === "granted"; }
+    if (ok) sendNotification({ title: "Видео загружено", body: `Ссылка скопирована` });
+  };
+
   const handleUpload = async () => {
     if (!info) return;
     setIsUploading(true);
     setError("");
     try {
-      const url = await invoke<string>("upload_video_to_download", { filePath: info.path });
-      setUploadUrl(url);
-      await writeText(url);
-      let ok = await isPermissionGranted();
-      if (!ok) { const p = await requestPermission(); ok = p === "granted"; }
-      if (ok) sendNotification({ title: "Видео загружено", body: `Ссылка скопирована` });
+      await doUpload();
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      if (msg.includes("401") || msg.includes("unauthorized") || msg.includes("No access token")) {
+        // Token expired — open OAuth, retry after auth
+        setError("");
+        try {
+          await invoke("open_oauth_browser");
+          const unlisten = await listen<boolean>("oauth-complete", async (event) => {
+            unlisten();
+            if (event.payload) {
+              setIsUploading(true);
+              try { await doUpload(); } catch (e2) { setError(String(e2)); }
+              finally { setIsUploading(false); }
+            } else {
+              setIsUploading(false);
+              setError("Авторизация не удалась. Попробуйте ещё раз.");
+            }
+          });
+          return;
+        } catch (authErr) {
+          setError(`Ошибка авторизации: ${authErr}`);
+        }
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsUploading(false);
     }

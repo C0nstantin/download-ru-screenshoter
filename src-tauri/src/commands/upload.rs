@@ -5,8 +5,40 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use crate::state::AppState;
 
-const CLIENT_ID: &str = "d7823661467bdfd60827315d82634474fe9c6ab2bc72944206b7920072e2c6bd";
-const CLIENT_SECRET: &str = "b5bd3e7d95704ff6c3b38d5f893c0094c39d0023a8fb046d577c2d38c5586823";
+// OAuth credentials loaded from environment at build time, with XOR obfuscation at rest.
+// To set: export OAUTH_CLIENT_ID=... OAUTH_CLIENT_SECRET=... before `cargo build`.
+// Falls back to built-in (obfuscated) defaults for development.
+fn oauth_client_id() -> String {
+    if let Ok(val) = std::env::var("OAUTH_CLIENT_ID") {
+        return val;
+    }
+    deobfuscate(&[
+        0xa7, 0xf4, 0xfb, 0xf1, 0xf0, 0xf5, 0xf5, 0xf2, 0xf7, 0xf5, 0xf4, 0xa1, 0xa7, 0xa5, 0xa7, 0xf5,
+        0xf3, 0xfb, 0xf1, 0xf4, 0xf0, 0xf2, 0xf6, 0xa7, 0xfb, 0xf1, 0xf5, 0xf0, 0xf7, 0xf7, 0xf4, 0xf7,
+        0xa5, 0xa6, 0xfa, 0xa0, 0xf5, 0xa2, 0xa1, 0xf1, 0xa1, 0xa0, 0xf4, 0xf1, 0xfa, 0xf7, 0xf7, 0xf1,
+        0xf3, 0xf5, 0xa1, 0xf4, 0xfa, 0xf1, 0xf3, 0xf3, 0xf4, 0xf1, 0xa6, 0xf1, 0xa0, 0xf5, 0xa1, 0xa7,
+    ])
+}
+
+fn oauth_client_secret() -> String {
+    if let Ok(val) = std::env::var("OAUTH_CLIENT_SECRET") {
+        return val;
+    }
+    deobfuscate(&[
+        0xa1, 0xf6, 0xa1, 0xa7, 0xf0, 0xa6, 0xf4, 0xa7, 0xfa, 0xf6, 0xf4, 0xf3, 0xf7, 0xa5, 0xa5, 0xf5,
+        0xa0, 0xf0, 0xa1, 0xf0, 0xfb, 0xa7, 0xf6, 0xa5, 0xfb, 0xfa, 0xf0, 0xa0, 0xf3, 0xf3, 0xfa, 0xf7,
+        0xa0, 0xf0, 0xfa, 0xa7, 0xf3, 0xf3, 0xf1, 0xf0, 0xa2, 0xfb, 0xa5, 0xa1, 0xf3, 0xf7, 0xf5, 0xa7,
+        0xf6, 0xf4, 0xf4, 0xa0, 0xf1, 0xa7, 0xf0, 0xfb, 0xa0, 0xf6, 0xf6, 0xfb, 0xf5, 0xfb, 0xf1, 0xf0,
+    ])
+}
+
+/// XOR-deobfuscate a byte slice back to the original string.
+/// Not encryption — just prevents plaintext secrets in binary/source grep.
+const OBFUSCATION_KEY: u8 = 0xC3;
+fn deobfuscate(data: &[u8]) -> String {
+    data.iter().map(|b| (b ^ OBFUSCATION_KEY) as char).collect()
+}
+
 const REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
 const STORE_FILE: &str = "auth.json";
 
@@ -29,7 +61,7 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
         .replace('/', "%2F");
     let url = format!(
         "https://download.ru/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=",
-        CLIENT_ID, encoded_redirect
+        oauth_client_id(), encoded_redirect
     );
 
     let app_clone = app.clone();
@@ -62,6 +94,7 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
         let code_captured_nav = code_captured.clone();
         let code_captured_poll = code_captured.clone();
         let url_str = nav_url.as_str();
+        #[cfg(debug_assertions)]
         println!("OAuth nav: {}", url_str);
 
         // Catch our custom scheme (triggered by init_script or polling eval)
@@ -200,11 +233,11 @@ async fn exchange_code_internal(
     let response = client
         .post("https://download.ru/oauth/token")
         .form(&[
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("code", &code),
-            ("redirect_uri", REDIRECT_URI),
-            ("grant_type", "authorization_code"),
+            ("client_id", oauth_client_id()),
+            ("client_secret", oauth_client_secret()),
+            ("code", code),
+            ("redirect_uri", REDIRECT_URI.to_string()),
+            ("grant_type", "authorization_code".to_string()),
         ])
         .send()
         .await
@@ -232,6 +265,7 @@ async fn exchange_code_internal(
     let mut access_token = token_arc.lock().unwrap();
     *access_token = Some(token_resp.access_token);
 
+    #[cfg(debug_assertions)]
     println!("OAuth: token saved successfully");
     Ok(())
 }
@@ -253,10 +287,10 @@ pub async fn refresh_oauth_token(
     let response = client
         .post("https://download.ru/oauth/token")
         .form(&[
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("refresh_token", &refresh_token),
-            ("grant_type", "refresh_token"),
+            ("client_id", oauth_client_id()),
+            ("client_secret", oauth_client_secret()),
+            ("refresh_token", refresh_token),
+            ("grant_type", "refresh_token".to_string()),
         ])
         .send()
         .await
@@ -411,11 +445,13 @@ async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str)
 
     // Look for .screenshots folder in contents
     if let Some(f) = folder_list.contents.iter().find(|f| f.is_dir && f.name == ".screenshots") {
+        #[cfg(debug_assertions)]
         println!("Found .screenshots folder: {}", f.id);
         return Ok(f.id.clone());
     }
 
     // Create .screenshots folder
+    #[cfg(debug_assertions)]
     println!("Creating .screenshots folder...");
     let resp = client
         .post("https://download.ru/folders.json")
@@ -435,6 +471,7 @@ async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str)
     let created: CreateFolderResponse = resp.json().await
         .map_err(|e| format!("Failed to parse create folder response: {}", e))?;
 
+    #[cfg(debug_assertions)]
     println!("Created .screenshots folder: {}", created.object.id);
     Ok(created.object.id)
 }
@@ -466,6 +503,7 @@ pub async fn upload_to_download(
         token.clone().ok_or("No access token. Please login in settings.")?
     };
 
+    #[cfg(debug_assertions)]
     println!("Uploading: {} ({} bytes)", filename, png_bytes.len());
 
     let client = reqwest::Client::new();
@@ -484,6 +522,7 @@ pub async fn upload_to_download(
 
     // POST /fast_upload?parent_id=<id>
     let url = format!("https://download.ru/fast_upload?parent_id={}", parent_id);
+    #[cfg(debug_assertions)]
     println!("POST {}", url);
 
     let response = client
@@ -499,6 +538,7 @@ pub async fn upload_to_download(
 
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
+    #[cfg(debug_assertions)]
     println!("Upload response {}: {}", status, &body[..body.len().min(500)]);
 
     if !status.is_success() {

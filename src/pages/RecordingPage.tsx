@@ -1,8 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 function RecordingPage() {
   const [stopping, setStopping] = useState(false);
+  const [muted, setMuted] = useState(false);
+
+  useEffect(() => {
+    invoke<boolean>("is_mic_muted").then(setMuted).catch(() => {});
+  }, []);
 
   const handleStop = async () => {
     setStopping(true);
@@ -15,12 +20,21 @@ function RecordingPage() {
     }
   };
 
+  const handleToggleMute = async () => {
+    try {
+      const nowMuted = await invoke<boolean>("toggle_mute_mic");
+      setMuted(nowMuted);
+    } catch (err) {
+      console.error("Toggle mute error:", err);
+    }
+  };
+
   return (
     <div style={{
       display: "flex",
       alignItems: "center",
-      gap: 12,
-      padding: "0 16px",
+      gap: 8,
+      padding: "0 12px",
       height: "100%",
       background: "#1a1a1a",
       borderRadius: 10,
@@ -38,6 +52,24 @@ function RecordingPage() {
       <span style={{ color: "#fff", fontSize: 13, fontWeight: 500, flex: 1 }}>
         {stopping ? "Завершение..." : "Запись..."}
       </span>
+      <button
+        onClick={handleToggleMute}
+        disabled={stopping}
+        title={muted ? "Включить микрофон" : "Выключить микрофон"}
+        style={{
+          background: muted ? "#7f1d1d" : "#2a2a3e",
+          color: "#fff",
+          border: "1px solid #444",
+          borderRadius: 6,
+          padding: "4px 8px",
+          fontSize: 14,
+          cursor: stopping ? "default" : "pointer",
+          opacity: stopping ? 0.6 : 1,
+          lineHeight: 1,
+        }}
+      >
+        {muted ? "🔇" : "🎙"}
+      </button>
       <button
         onClick={handleStop}
         disabled={stopping}

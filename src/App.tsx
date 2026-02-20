@@ -10,12 +10,16 @@ function App() {
   const [route, setRoute] = useState<string>("/");
 
   useEffect(() => {
-    const hash = window.location.hash.replace("#", "") || "/";
-    setRoute(hash);
+    const allowedRoutes = ["/", "/overlay", "/overlay-video", "/editor", "/recording", "/video-result"];
+    const sanitize = (raw: string) => {
+      const h = raw.replace("#", "") || "/";
+      return allowedRoutes.includes(h) ? h : "/";
+    };
+
+    setRoute(sanitize(window.location.hash));
 
     const handleHashChange = () => {
-      const newHash = window.location.hash.replace("#", "") || "/";
-      setRoute(newHash);
+      setRoute(sanitize(window.location.hash));
     };
 
     window.addEventListener("hashchange", handleHashChange);

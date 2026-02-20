@@ -1,6 +1,25 @@
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use crate::state::AppState;
 
+/// Validate that a file path is a recording in /tmp (our own files).
+/// Prevents path traversal attacks from frontend.
+fn validate_recording_path(path: &str) -> Result<(), String> {
+    let p = std::path::Path::new(path);
+    // Must be in /tmp and be a recording_*.mov/mp4 or *_converted.mp4
+    let filename = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let in_tmp = p.starts_with("/tmp");
+    let is_recording = filename.starts_with("recording_")
+        && (filename.ends_with(".mov") || filename.ends_with(".mp4"));
+    if !in_tmp || !is_recording {
+        return Err(format!("Access denied: path not allowed: {}", path));
+    }
+    // Prevent path traversal via .. components
+    if path.contains("..") {
+        return Err("Access denied: path traversal detected".into());
+    }
+    Ok(())
+}
+
 /// Shared helper: launch screencapture with given args, monitor process, show result on exit.
 #[cfg(target_os = "macos")]
 fn launch_screencapture(
@@ -43,6 +62,22 @@ fn launch_screencapture(
         { let mut p = state.recording_pid.lock().unwrap(); *p = None; }
         { let mut p = state.recording_path.lock().unwrap(); *p = None; }
 
+        // Restore mic volume if it was muted
+        #[cfg(target_os = "macos")]
+        {
+            let saved = { state.saved_input_volume.lock().unwrap().take() };
+            if let Some(vol) = saved {
+                let _ = std::process::Command::new("osascript")
+                    .args(["-e", &format!("set volume input volume {}", vol)])
+                    .status();
+            }
+        }
+
+        // Close the recording indicator window
+        if let Some(w) = app_clone.get_webview_window("recording") {
+            let _ = w.close();
+        }
+
         if std::fs::metadata(&recording_path).is_ok() {
             { let mut l = state.last_recording_path.lock().unwrap(); *l = Some(recording_path.clone()); }
             let _ = open_video_result_window(&app_clone, &recording_path);
@@ -57,21 +92,18 @@ fn launch_screencapture(
 }
 
 fn make_output_path() -> String {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    format!("/tmp/recording_{}.mov", timestamp)
+    format!("/tmp/recording_{}.mov", uuid::Uuid::new_v4())
 }
 
 /// Start full-screen video capture using native macOS UI (screencapture -v).
 /// Opens the same picker as Cmd+Shift+5 — user selects area/window/screen.
+/// -g captures audio from the default input (microphone).
 #[tauri::command]
 pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let output_path = make_output_path();
-        launch_screencapture(&app, &state, &["-v", &output_path], &output_path)?;
+        launch_screencapture(&app, &state, &["-v", "-g", &output_path], &output_path)?;
         return Ok(());
     }
 
@@ -109,7 +141,7 @@ pub fn start_video_recording(
         // Delay so the overlay window has time to close
         std::thread::sleep(std::time::Duration::from_millis(300));
 
-        launch_screencapture(&app, &state, &["-v", "-R", &rect_arg, &output_path], &output_path)?;
+        launch_screencapture(&app, &state, &["-v", "-g", "-R", &rect_arg, &output_path], &output_path)?;
         return Ok(());
     }
 
@@ -186,7 +218,7 @@ pub fn start_video_capture_window(app: AppHandle, state: State<'_, AppState>) ->
         };
         let wid_str = wid.to_string();
         let output_path = make_output_path();
-        launch_screencapture(&app, &state, &["-v", "-l", &wid_str, &output_path], &output_path)?;
+        launch_screencapture(&app, &state, &["-v", "-g", "-l", &wid_str, &output_path], &output_path)?;
         return Ok(());
     }
 
@@ -230,6 +262,10 @@ pub fn stop_video_recording(
         *last = Some(path.clone());
     }
 
+    // Restore mic volume if it was muted during recording
+    #[cfg(target_os = "macos")]
+    restore_input_volume(&state);
+
     // Close recording indicator
     if let Some(w) = app.get_webview_window("recording") {
         let _ = w.close().ok();
@@ -270,12 +306,14 @@ pub fn get_last_recording_path(state: State<'_, AppState>) -> Result<String, Str
 /// Delete a recording file
 #[tauri::command]
 pub fn delete_recording(path: String) -> Result<(), String> {
+    validate_recording_path(&path)?;
     std::fs::remove_file(&path).map_err(|e| format!("Failed to delete: {}", e))
 }
 
 /// Get info about a recorded video file
 #[tauri::command]
 pub fn get_video_info(path: String) -> Result<serde_json::Value, String> {
+    validate_recording_path(&path)?;
     let metadata = std::fs::metadata(&path)
         .map_err(|e| format!("File not found: {}", e))?;
     Ok(serde_json::json!({
@@ -298,6 +336,7 @@ pub async fn convert_to_mp4(
     start_sec: Option<f64>,
     duration_sec: Option<f64>,
 ) -> Result<String, String> {
+    validate_recording_path(&src_path)?;
     let dst_path = src_path
         .replace(".mov", "_converted.mp4")
         .replace(".MOV", "_converted.mp4");
@@ -349,6 +388,7 @@ pub async fn upload_video_to_download(
     file_path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
+    validate_recording_path(&file_path)?;
     let token = {
         let t = state.access_token.lock().unwrap();
         t.clone().ok_or("No access token. Please login in settings.")?
@@ -415,6 +455,7 @@ pub async fn upload_video_to_download(
 /// Move recorded video file to destination chosen by user
 #[tauri::command]
 pub fn move_recording(src_path: String, dst_path: String) -> Result<(), String> {
+    validate_recording_path(&src_path)?;
     std::fs::rename(&src_path, &dst_path)
         .or_else(|_| std::fs::copy(&src_path, &dst_path).map(|_| {
             let _ = std::fs::remove_file(&src_path);
@@ -446,6 +487,62 @@ fn open_video_result_window(app: &AppHandle, _path: &str) -> Result<(), String> 
     Ok(())
 }
 
+/// Restore system input volume from saved value (called on stop or unmute).
+#[cfg(target_os = "macos")]
+fn restore_input_volume(state: &State<'_, AppState>) {
+    let saved = {
+        let mut v = state.saved_input_volume.lock().unwrap();
+        v.take()
+    };
+    if let Some(vol) = saved {
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", &format!("set volume input volume {}", vol)])
+            .status();
+    }
+}
+
+/// Toggle microphone mute: saves current input volume and sets to 0, or restores saved volume.
+#[tauri::command]
+pub fn toggle_mute_mic(state: State<'_, AppState>) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let is_muted = state.saved_input_volume.lock().unwrap().is_some();
+        if is_muted {
+            // Unmute: restore saved volume
+            restore_input_volume(&state);
+            return Ok(false); // now unmuted
+        } else {
+            // Mute: get current volume, save it, set to 0
+            let output = std::process::Command::new("osascript")
+                .args(["-e", "input volume of (get volume settings)"])
+                .output()
+                .map_err(|e| format!("Failed to get input volume: {}", e))?;
+            let vol_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let vol: u32 = vol_str.parse().unwrap_or(75);
+            {
+                let mut saved = state.saved_input_volume.lock().unwrap();
+                *saved = Some(vol);
+            }
+            let _ = std::process::Command::new("osascript")
+                .args(["-e", "set volume input volume 0"])
+                .status();
+            return Ok(true); // now muted
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = state;
+        Err("Mic mute not yet implemented on this platform".into())
+    }
+}
+
+/// Check if mic is currently muted (i.e. we have a saved volume to restore).
+#[tauri::command]
+pub fn is_mic_muted(state: State<'_, AppState>) -> bool {
+    state.saved_input_volume.lock().unwrap().is_some()
+}
+
 fn show_recording_window(app: &AppHandle) -> Result<(), String> {
     // Show in Dock while recording
     #[cfg(target_os = "macos")]
@@ -457,7 +554,7 @@ fn show_recording_window(app: &AppHandle) -> Result<(), String> {
         WebviewUrl::App("index.html#/recording".into()),
     )
     .title("Запись")
-    .inner_size(220.0, 64.0)
+    .inner_size(260.0, 64.0)
     .always_on_top(true)
     .decorations(false)
     .skip_taskbar(true)
@@ -470,7 +567,7 @@ fn show_recording_window(app: &AppHandle) -> Result<(), String> {
         if let Some(monitor) = monitor {
             let size = monitor.size();
             let scale = monitor.scale_factor();
-            let win_w = 220.0;
+            let win_w = 260.0;
             let margin = 20.0;
             let x = (size.width as f64 / scale - win_w - margin) as i32;
             let y = 20;

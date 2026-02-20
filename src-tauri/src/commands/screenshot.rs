@@ -50,6 +50,7 @@ pub fn get_displays() -> Result<Vec<DisplayInfo>, String> {
         }
     }).collect();
 
+    #[cfg(debug_assertions)]
     println!("Found {} displays: {:?}", displays.len(), displays.iter().map(|d| format!("{}x{} at ({},{})", d.width, d.height, d.x, d.y)).collect::<Vec<_>>());
 
     Ok(displays)
@@ -169,6 +170,10 @@ pub fn save_screenshot(
     image_data: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // Block path traversal
+    if path.contains("..") {
+        return Err("Access denied: path traversal detected".into());
+    }
     let png_bytes = if let Some(data) = image_data {
         // Remove data URL prefix if present
         let base64_data = if data.contains(",") {
@@ -226,7 +231,7 @@ pub fn start_region_capture(app: AppHandle) -> Result<(), String> {
 fn start_region_capture_macos(app: AppHandle) -> Result<(), String> {
     println!("Starting native region capture (screencapture -i)...");
 
-    let temp_path = format!("/tmp/screenshot_region_{}.png", std::process::id());
+    let temp_path = format!("/tmp/screenshot_region_{}.png", uuid::Uuid::new_v4());
     let temp_path_clone = temp_path.clone();
     let app_clone = app.clone();
 
@@ -586,7 +591,7 @@ pub fn capture_window_and_edit(app: AppHandle) -> Result<(), String> {
 fn capture_window_macos(app: AppHandle) -> Result<(), String> {
     println!("capture_window_macos called");
 
-    let temp_path = format!("/tmp/screenshot_window_{}.png", std::process::id());
+    let temp_path = format!("/tmp/screenshot_window_{}.png", uuid::Uuid::new_v4());
     let temp_path_clone = temp_path.clone();
     let app_clone = app.clone();
 

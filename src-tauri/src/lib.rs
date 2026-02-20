@@ -18,6 +18,19 @@ pub fn run() {
             let path = req.uri().path().to_string();
             let file_path = percent_decode(&path);
 
+            // Security: only allow video files from /tmp/recording_* (our own recordings)
+            let canonical = std::path::Path::new(&file_path);
+            let is_allowed = canonical.starts_with("/tmp/recording_")
+                && matches!(
+                    canonical.extension().and_then(|e| e.to_str()),
+                    Some("mov" | "mp4" | "MOV" | "MP4")
+                );
+            if !is_allowed {
+                eprintln!("localfile:// blocked path: {}", file_path);
+                return tauri::http::Response::builder()
+                    .status(403).body(vec![]).unwrap();
+            }
+
             let mime = if file_path.ends_with(".mp4") { "video/mp4" }
                        else if file_path.ends_with(".mov") || file_path.ends_with(".MOV") { "video/quicktime" }
                        else { "application/octet-stream" };
@@ -34,6 +47,10 @@ pub fn run() {
                 let range_str = range_val.to_str().unwrap_or("bytes=0-");
                 let (start, end) = parse_byte_range(range_str, file_size);
                 let length = end - start + 1;
+                // Cap single range response at 10MB to prevent OOM
+                const MAX_RANGE_SIZE: u64 = 10 * 1024 * 1024;
+                let length = length.min(MAX_RANGE_SIZE);
+                let end = start + length - 1;
                 let mut buf = vec![0u8; length as usize];
                 let _ = file.seek(SeekFrom::Start(start));
                 let _ = file.read_exact(&mut buf);
@@ -125,6 +142,10 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Start as tray-only app (no Dock icon, no Cmd+Tab entry)
+            #[cfg(target_os = "macos")]
+            let _ = app.handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             // Register global shortcuts from saved config
             if let Err(e) = commands::hotkeys::register_hotkeys(&app.handle()) {
                 eprintln!("Failed to register hotkeys: {}", e);
@@ -133,15 +154,26 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let label = window.label();
-                if label == "main" || label == "editor" || label == "video-result" {
-                    window.hide().unwrap();
-                    api.prevent_close();
-                    // Hide from Dock and Cmd+Tab when no windows are visible
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let label = window.label();
+                    if label == "main" || label == "editor" || label == "video-result" {
+                        window.hide().unwrap();
+                        api.prevent_close();
+                        #[cfg(target_os = "macos")]
+                        update_activation_policy(window.app_handle());
+                    }
+                }
+                tauri::WindowEvent::Focused(true) => {
+                    // Any window got focus → show in Dock and Cmd+Tab
+                    #[cfg(target_os = "macos")]
+                    let _ = window.app_handle().set_activation_policy(tauri::ActivationPolicy::Regular);
+                }
+                tauri::WindowEvent::Destroyed => {
                     #[cfg(target_os = "macos")]
                     update_activation_policy(window.app_handle());
                 }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -173,6 +205,8 @@ pub fn run() {
             commands::recording::convert_to_mp4,
             commands::recording::upload_video_to_download,
             commands::recording::delete_recording,
+            commands::recording::toggle_mute_mic,
+            commands::recording::is_mic_muted,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -219,14 +253,14 @@ fn show_settings_window(app: &AppHandle) {
 
 #[cfg(target_os = "macos")]
 fn update_activation_policy(app: &AppHandle) {
-    let main_visible = app.get_webview_window("main")
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
-    let editor_visible = app.get_webview_window("editor")
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
+    let dominated_windows = ["main", "editor", "video-result", "recording"];
+    let any_visible = dominated_windows.iter().any(|label| {
+        app.get_webview_window(label)
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false)
+    });
 
-    if !main_visible && !editor_visible {
+    if !any_visible {
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     }
 }

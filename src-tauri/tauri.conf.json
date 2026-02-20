@@ -23,12 +23,12 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' localfile: http://localfile.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' localfile: http://localfile.localhost blob:; connect-src 'self' https://download.ru; font-src 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["dmg", "nsis", "deb", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

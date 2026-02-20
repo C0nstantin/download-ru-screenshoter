@@ -9,6 +9,8 @@ pub struct AppState {
     pub recording_path: Mutex<Option<String>>,
     /// Path of the last completed recording (persists after stop for the result window)
     pub last_recording_path: Mutex<Option<String>>,
+    /// Saved system input volume before muting (to restore on stop/unmute)
+    pub saved_input_volume: Mutex<Option<u32>>,
 }
 
 impl Default for AppState {
@@ -21,6 +23,7 @@ impl Default for AppState {
             recording_pid: Mutex::new(None),
             recording_path: Mutex::new(None),
             last_recording_path: Mutex::new(None),
+            saved_input_volume: Mutex::new(None),
         }
     }
 }
