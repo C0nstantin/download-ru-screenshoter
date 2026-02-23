@@ -6,6 +6,12 @@
 
 ![Скриншот приложения](https://download.ru/g/ZkwDQxr7/8PVILfiF3ZldwnyoyagP5Q/1771860710)
 
+
+
+https://github.com/user-attachments/assets/fb020613-4d54-4845-8bff-015a1a98d0ec
+
+
+
 ---
 
 ## Возможности
