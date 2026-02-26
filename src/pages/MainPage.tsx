@@ -167,7 +167,7 @@ function MainPage() {
       <section className="section">
         <h2>Как использовать</h2>
         <ol>
-          <li>Нажмите <kbd>Ctrl+Shift+4</kbd> для выделения области</li>
+          <li>Нажмите {hotkeys.region.split("+").map((k, i) => <kbd key={i}>{k}</kbd>)} для выделения области</li>
           <li>Отредактируйте скриншот (стрелки, рамки, текст)</li>
           <li>Нажмите "Загрузить" - ссылка скопируется в буфер</li>
         </ol>

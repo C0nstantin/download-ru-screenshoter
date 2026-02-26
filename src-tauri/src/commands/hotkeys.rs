@@ -154,7 +154,25 @@ pub fn set_hotkeys(app: AppHandle, config: HotkeyConfig) -> Result<(), String> {
     store.set("hotkeys", serde_json::to_value(&config).map_err(|e| e.to_string())?);
     store.save().map_err(|e| e.to_string())?;
 
+    // Update tray menu labels to reflect new hotkeys
+    update_tray_menu_labels(&app, &config);
+
     Ok(())
+}
+
+fn update_tray_menu_labels(app: &AppHandle, config: &HotkeyConfig) {
+    let updates = [
+        ("screenshot", format!("Скриншот области ({})", config.region)),
+        ("screenshot_full", format!("Скриншот экрана ({})", config.fullscreen)),
+        ("screenshot_window", format!("Скриншот окна ({})", config.window)),
+    ];
+    for (id, text) in updates {
+        if let Some(item) = app.menu().and_then(|m| m.get(id)) {
+            if let tauri::menu::MenuItemKind::MenuItem(mi) = item {
+                let _ = mi.set_text(text);
+            }
+        }
+    }
 }
 
 pub fn register_hotkeys(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
