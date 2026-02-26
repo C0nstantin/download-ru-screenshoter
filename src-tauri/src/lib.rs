@@ -128,10 +128,16 @@ pub fn run() {
                             let _ = commands::screenshot::start_region_capture(app_handle.clone());
                         }
                         "screenshot_full" => {
-                            let _ = commands::screenshot::capture_fullscreen_and_edit_internal(app_handle.clone(), None);
+                            let app = app_handle.clone();
+                            std::thread::spawn(move || {
+                                let _ = commands::screenshot::capture_fullscreen_and_edit_internal(app, None);
+                            });
                         }
                         "screenshot_window" => {
-                            let _ = commands::screenshot::capture_window_and_edit(app_handle.clone());
+                            let app = app_handle.clone();
+                            std::thread::spawn(move || {
+                                let _ = commands::screenshot::capture_window_and_edit(app);
+                            });
                         }
                         "video_screen" => {
                             let state = app_handle.state::<AppState>();
