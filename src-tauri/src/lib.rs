@@ -24,6 +24,10 @@ pub fn activate_as_regular(app: &AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // If user tries to launch again, show settings window
+            show_settings_window(app);
+        }))
         // Custom protocol to serve local video files with byte-range support
         .register_uri_scheme_protocol("localfile", |_app, req| {
             let path = req.uri().path().to_string();
