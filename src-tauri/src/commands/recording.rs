@@ -539,9 +539,10 @@ pub fn is_mic_muted(state: State<'_, AppState>) -> bool {
 }
 
 fn show_recording_window(app: &AppHandle) -> Result<(), String> {
-    // Show in Dock while recording
-    #[cfg(target_os = "macos")]
-    crate::activate_as_regular(app);
+    // Do NOT call activate_as_regular here — it steals focus from the native
+    // screencapture picker, causing it to cancel and exit immediately.
+    // The window is always_on_top so it's visible without app activation.
+    // Dock activation happens via Focused(true) handler when user clicks the window.
 
     let win = WebviewWindowBuilder::new(
         app,
