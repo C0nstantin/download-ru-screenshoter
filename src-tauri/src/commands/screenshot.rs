@@ -725,8 +725,8 @@ fn create_editor_window(app: &AppHandle, width: u32, height: u32) -> Result<(), 
 
     println!("Editor window size: {}x{}", win_width, win_height);
 
-    // Add timestamp to URL to prevent caching
-    let url = format!("index.html?t={}#/editor", std::time::SystemTime::now()
+    // Add timestamp to URL to prevent caching (placed after hash for WebView2 compatibility)
+    let url = format!("index.html#/editor?t={}", std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis());

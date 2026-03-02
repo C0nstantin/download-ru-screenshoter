@@ -190,7 +190,13 @@ pub fn run() {
                 }
                 tauri::WindowEvent::Focused(true) => {
                     #[cfg(target_os = "macos")]
-                    activate_as_regular(window.app_handle());
+                    {
+                        // Only show in Dock/Cmd+Tab for actual UI windows, not overlays/oauth/hidden
+                        let dominated = ["main", "editor", "video-result", "recording"];
+                        if dominated.contains(&window.label()) && window.is_visible().unwrap_or(false) {
+                            activate_as_regular(window.app_handle());
+                        }
+                    }
                 }
                 tauri::WindowEvent::Destroyed => {
                     #[cfg(target_os = "macos")]
@@ -275,14 +281,20 @@ fn show_settings_window(app: &AppHandle) {
 
 #[cfg(target_os = "macos")]
 fn update_activation_policy(app: &AppHandle) {
-    let dominated_windows = ["main", "editor", "video-result", "recording"];
-    let any_visible = dominated_windows.iter().any(|label| {
-        app.get_webview_window(label)
-            .and_then(|w| w.is_visible().ok())
-            .unwrap_or(false)
-    });
+    // Delay check so window hide/destroy fully completes before we inspect visibility.
+    // Without delay, is_visible() may still return true for a window mid-hide.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let dominated_windows = ["main", "editor", "video-result", "recording"];
+        let any_visible = dominated_windows.iter().any(|label| {
+            app.get_webview_window(label)
+                .and_then(|w| w.is_visible().ok())
+                .unwrap_or(false)
+        });
 
-    if !any_visible {
-        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-    }
+        if !any_visible {
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+        }
+    });
 }

@@ -12,7 +12,8 @@ function App() {
   useEffect(() => {
     const allowedRoutes = ["/", "/overlay", "/overlay-video", "/editor", "/recording", "/video-result"];
     const sanitize = (raw: string) => {
-      const h = raw.replace("#", "") || "/";
+      // Strip query params from hash (e.g. "#/editor?t=123" → "/editor")
+      const h = raw.replace("#", "").split("?")[0] || "/";
       return allowedRoutes.includes(h) ? h : "/";
     };
 

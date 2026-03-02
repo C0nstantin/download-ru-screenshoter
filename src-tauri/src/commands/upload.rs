@@ -72,12 +72,20 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
 
     // Only capture code= from URL params on page load (safe, no false positives).
     // Full page scan is done by Rust-side polling via eval() after user clicks Allow.
+    // Wrapped in DOMContentLoaded + setTimeout for WebView2 (Windows) timing reliability.
     let init_script = r#"
         (function() {
-            var params = new URLSearchParams(window.location.search);
-            var code = params.get('code');
-            if (code) {
-                window.location = 'oauth-capture://code?code=' + encodeURIComponent(code);
+            function checkCode() {
+                var params = new URLSearchParams(window.location.search);
+                var code = params.get('code');
+                if (code) {
+                    window.location = 'oauth-capture://code?code=' + encodeURIComponent(code);
+                }
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function() { setTimeout(checkCode, 100); });
+            } else {
+                setTimeout(checkCode, 100);
             }
         })();
     "#;
@@ -89,6 +97,7 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
     )
     .title("Авторизация download.ru")
     .inner_size(900.0, 650.0)
+    .visible(true)
     .initialization_script(init_script)
     .on_navigation(move |nav_url| {
         let code_captured_nav = code_captured.clone();
