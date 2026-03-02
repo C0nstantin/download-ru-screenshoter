@@ -850,8 +850,8 @@ function EditorPage() {
             ⟲
           </button>
         </div>
-        <button onClick={handleCopyImage} title="Копировать изображение в буфер">
-          {copied ? "Скопировано ✓" : "Копировать"}
+        <button onClick={handleCopyImage} title="Копировать изображение в буфер обмена" style={{ minWidth: 110 }}>
+          {copied ? "Скопировано ✓" : "📋 В буфер"}
         </button>
         <button onClick={handleSave}>Сохранить</button>
         <button
@@ -871,7 +871,7 @@ function EditorPage() {
           <p>Загружено! Ссылка скопирована в буфер.</p>
           <div className="url-row">
             <input type="text" value={uploadResult.secure_url} readOnly />
-            <button onClick={handleCopyUrl}>Копировать</button>
+            <button onClick={handleCopyUrl}>📎 Копировать ссылку</button>
           </div>
         </div>
       )}

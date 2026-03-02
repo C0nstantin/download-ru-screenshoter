@@ -108,9 +108,16 @@ function MainPage() {
       .catch((err) => setStatus(`Ошибка: ${err}`));
   };
 
-  const startEditingHotkey = (type: "region" | "fullscreen" | "window") => {
+  const startEditingHotkey = async (type: "region" | "fullscreen" | "window") => {
+    await invoke("unregister_hotkeys");
     setEditingHotkey(type);
     setTimeout(() => hotkeyInputRef.current?.focus(), 0);
+  };
+
+  const cancelEditingHotkey = () => {
+    setEditingHotkey(null);
+    // Re-register current hotkeys
+    invoke("set_hotkeys", { config: hotkeys }).catch(() => {});
   };
 
   return (
@@ -129,7 +136,7 @@ function MainPage() {
                   className="hotkey-input"
                   placeholder="Нажмите комбинацию..."
                   onKeyDown={(e) => handleHotkeyKeyDown(e, type)}
-                  onBlur={() => setEditingHotkey(null)}
+                  onBlur={() => cancelEditingHotkey()}
                   readOnly
                 />
               ) : (

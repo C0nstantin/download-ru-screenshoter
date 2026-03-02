@@ -216,6 +216,7 @@ pub fn run() {
             commands::upload::logout,
             commands::hotkeys::get_hotkeys,
             commands::hotkeys::set_hotkeys,
+            commands::hotkeys::unregister_hotkeys,
             commands::settings::open_system_settings,
             commands::recording::start_video_capture,
             commands::recording::start_video_recording,

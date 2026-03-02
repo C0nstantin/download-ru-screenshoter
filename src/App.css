@@ -54,7 +54,10 @@ body {
 
 .shortcut span {
   color: #888;
-  margin-left: auto;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hotkey-btn {
@@ -64,6 +67,7 @@ body {
   background: transparent;
   border: 1px solid #3a3a5c;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .hotkey-btn:hover {
@@ -76,7 +80,9 @@ body {
 }
 
 .hotkey-input {
-  width: 150px;
+  min-width: 120px;
+  max-width: 200px;
+  flex-shrink: 0;
   padding: 6px 10px;
   background: #1a1a2e;
   border: 2px solid #0066ff;
@@ -392,8 +398,8 @@ input[type="range"] {
   flex: 1;
   overflow: auto;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: safe center;
+  justify-content: safe center;
   padding: 10px;
   background: #111122;
 }

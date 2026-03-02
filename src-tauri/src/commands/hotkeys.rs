@@ -114,6 +114,18 @@ pub fn get_hotkeys(app: AppHandle) -> HotkeyConfig {
     HotkeyConfig::default()
 }
 
+/// Temporarily unregister all hotkeys (while user is editing hotkey bindings)
+#[tauri::command]
+pub fn unregister_hotkeys(app: AppHandle) -> Result<(), String> {
+    let config = get_hotkeys(app.clone());
+    for key in [&config.region, &config.fullscreen, &config.window] {
+        if let Some(s) = parse_shortcut(key) {
+            let _ = app.global_shortcut().unregister(s);
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn set_hotkeys(app: AppHandle, config: HotkeyConfig) -> Result<(), String> {
     // Unregister old shortcuts

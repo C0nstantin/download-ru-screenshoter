@@ -420,12 +420,12 @@ struct FolderObject {
     id: String,
 }
 
-/// Get or create .screenshots folder, return its id (public alias for use from recording.rs)
+/// Get or create Screenshots folder, return its id (public alias for use from recording.rs)
 pub async fn get_or_create_screenshots_folder_pub(client: &reqwest::Client, token: &str) -> Result<String, String> {
     get_or_create_screenshots_folder(client, token).await
 }
 
-/// Get or create .screenshots folder, return its id
+/// Get or create Screenshots folder, return its id
 async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str) -> Result<String, String> {
     // List root folder contents
     let resp = client
@@ -443,21 +443,21 @@ async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str)
     let folder_list: FolderListResponse = resp.json().await
         .map_err(|e| format!("Failed to parse folders: {}", e))?;
 
-    // Look for .screenshots folder in contents
-    if let Some(f) = folder_list.contents.iter().find(|f| f.is_dir && f.name == ".screenshots") {
+    // Look for Screenshots folder in contents
+    if let Some(f) = folder_list.contents.iter().find(|f| f.is_dir && f.name == "Screenshots") {
         #[cfg(debug_assertions)]
-        println!("Found .screenshots folder: {}", f.id);
+        println!("Found Screenshots folder: {}", f.id);
         return Ok(f.id.clone());
     }
 
-    // Create .screenshots folder
+    // Create Screenshots folder
     #[cfg(debug_assertions)]
-    println!("Creating .screenshots folder...");
+    println!("Creating Screenshots folder...");
     let resp = client
         .post("https://download.ru/folders.json")
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/json")
-        .form(&[("folder[name]", ".screenshots")])
+        .form(&[("folder[name]", "Screenshots")])
         .send()
         .await
         .map_err(|e| format!("Failed to create folder: {}", e))?;
@@ -472,7 +472,7 @@ async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str)
         .map_err(|e| format!("Failed to parse create folder response: {}", e))?;
 
     #[cfg(debug_assertions)]
-    println!("Created .screenshots folder: {}", created.object.id);
+    println!("Created Screenshots folder: {}", created.object.id);
     Ok(created.object.id)
 }
 
@@ -508,7 +508,7 @@ pub async fn upload_to_download(
 
     let client = reqwest::Client::new();
 
-    // Get or create .screenshots folder
+    // Get or create Screenshots folder
     let parent_id = get_or_create_screenshots_folder(&client, &token).await?;
 
     // Create multipart form - field name "files[]" as browser does

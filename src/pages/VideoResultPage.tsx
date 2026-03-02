@@ -230,7 +230,7 @@ function VideoResultPage() {
           <span style={{ color: "#4ade80", fontSize: 11, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {uploadUrl}
           </span>
-          <button onClick={() => { writeText(uploadUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }} style={btnSm}>
+          <button onClick={() => { writeText(uploadUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }} style={{ ...btnSm, minWidth: 110 }}>
             {copied ? "Скопировано ✓" : "Копировать"}
           </button>
         </div>
