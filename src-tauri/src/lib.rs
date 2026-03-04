@@ -119,8 +119,13 @@ pub fn run() {
 
             let menu = Menu::with_items(&handle, &[&snap_i, &snap_full_i, &snap_win_i, &video_screen_i, &video_region_i, &video_window_i, &settings_i, &quit_i])?;
 
+            let tray_icon_bytes = include_bytes!("../icons/tray-icon.png");
+            let tray_icon = tauri::image::Image::from_bytes(tray_icon_bytes)
+                .expect("failed to load tray icon");
+
             let _tray = TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon)
+                .icon_as_template(true)
                 .menu(&menu)
                 .on_menu_event(move |app_handle: &AppHandle, event| {
                     match event.id.as_ref() {
