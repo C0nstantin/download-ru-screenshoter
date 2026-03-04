@@ -197,6 +197,11 @@ pub fn register_hotkeys(app: &AppHandle) -> Result<(), Box<dyn std::error::Error
     let window_shortcut = parse_shortcut(&config.window)
         .ok_or("Invalid window shortcut")?;
 
+    // Unregister first to avoid "already registered" errors
+    let _ = app.global_shortcut().unregister(region_shortcut);
+    let _ = app.global_shortcut().unregister(fullscreen_shortcut);
+    let _ = app.global_shortcut().unregister(window_shortcut);
+
     app.global_shortcut().register(region_shortcut)?;
     app.global_shortcut().register(fullscreen_shortcut)?;
     app.global_shortcut().register(window_shortcut)?;

@@ -182,6 +182,10 @@ pub fn run() {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     let label = window.label();
                     if label == "main" || label == "editor" || label == "video-result" {
+                        // Re-register hotkeys in case user was editing and closed without saving
+                        if label == "main" {
+                            let _ = commands::hotkeys::register_hotkeys(window.app_handle());
+                        }
                         window.hide().unwrap();
                         api.prevent_close();
                         #[cfg(target_os = "macos")]
