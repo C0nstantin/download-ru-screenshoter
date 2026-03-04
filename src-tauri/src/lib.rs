@@ -147,6 +147,9 @@ pub fn run() {
                             let state = app_handle.state::<AppState>();
                             let _ = commands::recording::start_video_capture(app_handle.clone(), state);
                         }
+                        "stop_recording" => {
+                            let _ = commands::recording::stop_recording_internal(app_handle);
+                        }
                         "video_region" => {
                             let _ = commands::screenshot::start_region_capture_overlay_video(app_handle.clone());
                         }
@@ -195,8 +198,9 @@ pub fn run() {
                 tauri::WindowEvent::Focused(true) => {
                     #[cfg(target_os = "macos")]
                     {
-                        // Only show in Dock/Cmd+Tab for actual UI windows, not overlays/oauth/hidden
-                        let dominated = ["main", "editor", "video-result", "recording"];
+                        // Only show in Dock/Cmd+Tab for actual UI windows, not overlays/oauth/hidden.
+                        // "recording" is excluded — its focus would steal from screencapture's native picker.
+                        let dominated = ["main", "editor", "video-result"];
                         if dominated.contains(&window.label()) && window.is_visible().unwrap_or(false) {
                             activate_as_regular(window.app_handle());
                         }
@@ -290,7 +294,7 @@ fn update_activation_policy(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(250));
-        let dominated_windows = ["main", "editor", "video-result", "recording"];
+        let dominated_windows = ["main", "editor", "video-result"];
         let any_visible = dominated_windows.iter().any(|label| {
             app.get_webview_window(label)
                 .and_then(|w| w.is_visible().ok())

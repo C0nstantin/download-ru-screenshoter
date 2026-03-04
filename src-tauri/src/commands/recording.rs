@@ -1,4 +1,5 @@
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::MenuItem;
 use crate::state::AppState;
 
 /// Validate that a file path is a recording in /tmp (our own files).
@@ -15,6 +16,21 @@ fn validate_recording_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Debug log helper — writes to /tmp/recording_debug.log
+#[cfg(target_os = "macos")]
+fn debug_log(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true).append(true)
+        .open("/tmp/recording_debug.log")
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let _ = writeln!(f, "[{:.3}] {}", now.as_secs_f64(), msg);
+    }
+}
+
 /// Shared helper: launch screencapture with given args, monitor process, show result on exit.
 #[cfg(target_os = "macos")]
 fn launch_screencapture(
@@ -23,15 +39,48 @@ fn launch_screencapture(
     args: &[&str],
     output_path: &str,
 ) -> Result<(), String> {
+    debug_log(&format!("launch_screencapture called, args: {:?}", args));
+
+    // Check screen recording permission
+    {
+        extern "C" {
+            fn CGRequestScreenCaptureAccess() -> bool;
+        }
+        let has_access = unsafe { CGRequestScreenCaptureAccess() };
+        debug_log(&format!("CGRequestScreenCaptureAccess = {}", has_access));
+        if !has_access {
+            let _ = std::process::Command::new("open")
+                .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+                .spawn();
+            return Err("Нет разрешения на запись экрана. Добавьте приложение в Системные настройки → Конфиденциальность → Запись экрана".into());
+        }
+    }
+
+    // Set activation policy to Regular so screencapture's child process has
+    // proper display/WindowServer access (Accessory mode blocks it).
+    // Use set_activation_policy directly — do NOT call activateIgnoringOtherApps_
+    // because that steals focus from the native picker and causes it to cancel.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        debug_log("set activation policy to Regular (without stealing focus)");
+    }
+
     let mut child = std::process::Command::new("screencapture")
         .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start screencapture: {}", e))?;
 
+    let pid = child.id();
+    debug_log(&format!("screencapture spawned, pid={}", pid));
+
     // Store PID so stop_video_recording can kill the process
     {
-        let mut pid = state.recording_pid.lock().unwrap();
-        *pid = Some(child.id());
+        let mut pid_guard = state.recording_pid.lock().unwrap();
+        *pid_guard = Some(pid);
     }
     {
         let mut path = state.recording_path.lock().unwrap();
@@ -42,14 +91,29 @@ fn launch_screencapture(
         *last = Some(output_path.to_string());
     }
 
-    // Show our Stop button while recording
-    show_recording_window(app)?;
+    // Update tray menu to show "Stop recording" item
+    set_tray_recording_mode(app, true);
 
     // Monitor process in background — show result window when screencapture exits
     let app_clone = app.clone();
     let recording_path = output_path.to_string();
     std::thread::spawn(move || {
-        let _ = child.wait();
+        let start = std::time::Instant::now();
+
+        let status = child.wait();
+        let elapsed = start.elapsed();
+
+        let status_str = match &status {
+            Ok(s) => format!("exit={:?}", s),
+            Err(e) => format!("wait error: {}", e),
+        };
+        debug_log(&format!(
+            "screencapture exited: {}, elapsed={:.1}ms, file_exists={}",
+            status_str,
+            elapsed.as_secs_f64() * 1000.0,
+            std::fs::metadata(&recording_path).is_ok()
+        ));
+
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         let state = app_clone.state::<AppState>();
@@ -58,7 +122,6 @@ fn launch_screencapture(
         { let mut p = state.recording_path.lock().unwrap(); *p = None; }
 
         // Restore mic volume if it was muted
-        #[cfg(target_os = "macos")]
         {
             let saved = { state.saved_input_volume.lock().unwrap().take() };
             if let Some(vol) = saved {
@@ -68,16 +131,14 @@ fn launch_screencapture(
             }
         }
 
-        // Close the recording indicator window
-        if let Some(w) = app_clone.get_webview_window("recording") {
-            let _ = w.close();
-        }
+        // Restore normal tray menu
+        set_tray_recording_mode(&app_clone, false);
 
         if std::fs::metadata(&recording_path).is_ok() {
             { let mut l = state.last_recording_path.lock().unwrap(); *l = Some(recording_path.clone()); }
             let _ = open_video_result_window(&app_clone, &recording_path);
         } else {
-            eprintln!("Recording cancelled — no file created");
+            debug_log("Recording cancelled — no file created");
             let mut l = state.last_recording_path.lock().unwrap();
             *l = None;
         }
@@ -98,7 +159,10 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
     #[cfg(target_os = "macos")]
     {
         let output_path = make_output_path();
-        launch_screencapture(&app, &state, &["-v", "-g", &output_path], &output_path)?;
+        // Note: -g (audio capture) removed — it causes screencapture to exit immediately
+        // when the parent process doesn't have explicit microphone TCC permission.
+        // Audio can be added back once mic permission is properly configured.
+        launch_screencapture(&app, &state, &["-v", &output_path], &output_path)?;
         return Ok(());
     }
 
@@ -136,7 +200,7 @@ pub fn start_video_recording(
         // Delay so the overlay window has time to close
         std::thread::sleep(std::time::Duration::from_millis(300));
 
-        launch_screencapture(&app, &state, &["-v", "-g", "-R", &rect_arg, &output_path], &output_path)?;
+        launch_screencapture(&app, &state, &["-v", "-R", &rect_arg, &output_path], &output_path)?;
         return Ok(());
     }
 
@@ -213,7 +277,7 @@ pub fn start_video_capture_window(app: AppHandle, state: State<'_, AppState>) ->
         };
         let wid_str = wid.to_string();
         let output_path = make_output_path();
-        launch_screencapture(&app, &state, &["-v", "-g", "-l", &wid_str, &output_path], &output_path)?;
+        launch_screencapture(&app, &state, &["-v", "-l", &wid_str, &output_path], &output_path)?;
         return Ok(());
     }
 
@@ -226,12 +290,47 @@ pub fn start_video_capture_window(app: AppHandle, state: State<'_, AppState>) ->
 }
 
 
-/// Stop recording, return path to the .mov file
-#[tauri::command]
-pub fn stop_video_recording(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+/// Rebuild the tray menu in normal or "recording" mode.
+/// In recording mode, shows "Stop recording" instead of the start-recording items.
+pub fn set_tray_recording_mode(app: &AppHandle, recording: bool) {
+    use tauri::menu::Menu;
+
+    let hotkeys = crate::commands::hotkeys::get_hotkeys(app.clone());
+
+    let items: Vec<MenuItem<tauri::Wry>> = if recording {
+        // Recording mode: only show stop + settings + quit
+        vec![
+            MenuItem::with_id(app, "stop_recording", "⏹ Остановить запись", true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "settings", "Настройки...", true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>).unwrap(),
+        ]
+    } else {
+        // Normal mode: all screenshot and video items
+        vec![
+            MenuItem::with_id(app, "screenshot", format!("Скриншот области ({})", hotkeys.region), true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "screenshot_full", format!("Скриншот экрана ({})", hotkeys.fullscreen), true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "screenshot_window", format!("Скриншот окна ({})", hotkeys.window), true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "video_screen", "Запись экрана", true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "video_region", "Запись области", true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "video_window", "Запись окна", true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "settings", "Настройки...", true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>).unwrap(),
+        ]
+    };
+
+    let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
+    if let Ok(menu) = Menu::with_items(app, &refs) {
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
+}
+
+/// Stop recording — called from tray menu or from frontend command.
+/// Sends SIGINT to screencapture, the background monitor thread handles the rest.
+pub fn stop_recording_internal(app: &AppHandle) -> Result<String, String> {
+    let state = app.state::<AppState>();
+
     let path = {
         let p = state.recording_path.lock().unwrap();
         p.clone().ok_or("No recording in progress")?
@@ -247,11 +346,7 @@ pub fn stop_video_recording(
         }
     }
 
-    // Clear active recording path, save as last_recording_path for result window
-    {
-        let mut p = state.recording_path.lock().unwrap();
-        *p = None;
-    }
+    // Save as last_recording_path
     {
         let mut last = state.last_recording_path.lock().unwrap();
         *last = Some(path.clone());
@@ -261,27 +356,18 @@ pub fn stop_video_recording(
     #[cfg(target_os = "macos")]
     restore_input_volume(&state);
 
-    // Close recording indicator
-    if let Some(w) = app.get_webview_window("recording") {
-        let _ = w.close().ok();
-    }
-
-    // Give screencapture a moment to flush the file to disk
-    std::thread::sleep(std::time::Duration::from_millis(500));
-
-    // Only open result window if file actually exists
-    if std::fs::metadata(&path).is_ok() {
-        open_video_result_window(&app, &path)?;
-    } else {
-        // File not created (user cancelled picker or recording too short)
-        eprintln!("Recording file not found: {} — user may have cancelled", path);
-        {
-            let mut last = state.last_recording_path.lock().unwrap();
-            *last = None;
-        }
-    }
+    // Tray menu will be restored by the background monitor thread when screencapture exits
 
     Ok(path)
+}
+
+/// Stop recording, return path to the .mov file
+#[tauri::command]
+pub fn stop_video_recording(
+    app: AppHandle,
+    _state: State<'_, AppState>,
+) -> Result<String, String> {
+    stop_recording_internal(&app)
 }
 
 /// Check if recording is in progress
@@ -538,41 +624,3 @@ pub fn is_mic_muted(state: State<'_, AppState>) -> bool {
     state.saved_input_volume.lock().unwrap().is_some()
 }
 
-fn show_recording_window(app: &AppHandle) -> Result<(), String> {
-    // Do NOT call activate_as_regular here — it steals focus from the native
-    // screencapture picker, causing it to cancel and exit immediately.
-    // The window is always_on_top so it's visible without app activation.
-    // Dock activation happens via Focused(true) handler when user clicks the window.
-
-    let win = WebviewWindowBuilder::new(
-        app,
-        "recording",
-        WebviewUrl::App("index.html#/recording".into()),
-    )
-    .title("Запись")
-    .inner_size(260.0, 64.0)
-    .always_on_top(true)
-    .decorations(false)
-    .skip_taskbar(true)
-    .resizable(false)
-    .build()
-    .map_err(|e| format!("Failed to create recording window: {}", e))?;
-
-    // Position in top-right corner
-    if let Ok(monitor) = win.current_monitor() {
-        if let Some(monitor) = monitor {
-            let size = monitor.size();
-            let scale = monitor.scale_factor();
-            let win_w = 260.0;
-            let margin = 20.0;
-            let x = (size.width as f64 / scale - win_w - margin) as i32;
-            let y = 20;
-            let _ = win.set_position(tauri::PhysicalPosition::new(
-                (x as f64 * scale) as i32,
-                (y as f64 * scale) as i32,
-            ));
-        }
-    }
-
-    Ok(())
-}
