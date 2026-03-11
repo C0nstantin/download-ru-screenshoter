@@ -52,7 +52,7 @@ fn launch_screencapture(
             let _ = std::process::Command::new("open")
                 .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
                 .spawn();
-            return Err("Нет разрешения на запись экрана. Добавьте приложение в Системные настройки → Конфиденциальность → Запись экрана".into());
+            return Err(crate::i18n::current(app).no_screen_permission.into());
         }
     }
 
@@ -216,8 +216,8 @@ pub fn start_video_recording(
 /// Show a native window picker via osascript/JXA, return CGWindowID.
 /// Returns None if user cancelled.
 #[cfg(target_os = "macos")]
-fn pick_window_id() -> Result<Option<u32>, String> {
-    let script = r#"
+fn pick_window_id(prompt: &str) -> Result<Option<u32>, String> {
+    let script_template = r#"
 ObjC.import("CoreGraphics");
 var opts = 1 | 16;
 var windowList = ObjC.castRefToObject($.CGWindowListCopyWindowInfo(opts, 0));
@@ -243,7 +243,7 @@ else {
     var app = Application.currentApplication();
     app.includeStandardAdditions = true;
     var chosen = app.chooseFromList(choices, {
-        withPrompt: "Выберите окно для записи:",
+        withPrompt: "PROMPT_PLACEHOLDER",
         defaultItems: [choices[0]]
     });
     if (chosen && chosen.length > 0) { "" + idMap[chosen[0]]; }
@@ -251,8 +251,10 @@ else {
 }
 "#;
 
+    let script = script_template.replace("PROMPT_PLACEHOLDER", prompt);
+
     let output = std::process::Command::new("osascript")
-        .args(["-l", "JavaScript", "-e", script])
+        .args(["-l", "JavaScript", "-e", &script])
         .output()
         .map_err(|e| format!("Failed to run window picker: {}", e))?;
 
@@ -270,7 +272,8 @@ else {
 pub fn start_video_capture_window(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let window_id = pick_window_id()?;
+        let tr = crate::i18n::current(&app);
+        let window_id = pick_window_id(tr.pick_window_prompt)?;
         let wid = match window_id {
             Some(id) => id,
             None => return Ok(()), // user cancelled
@@ -297,24 +300,26 @@ pub fn set_tray_recording_mode(app: &AppHandle, recording: bool) {
 
     let hotkeys = crate::commands::hotkeys::get_hotkeys(app.clone());
 
+    let tr = crate::i18n::current(app);
+
     let items: Vec<MenuItem<tauri::Wry>> = if recording {
         // Recording mode: only show stop + settings + quit
         vec![
-            MenuItem::with_id(app, "stop_recording", "⏹ Остановить запись", true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "settings", "Настройки...", true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "stop_recording", format!("⏹ {}", tr.stop_recording), true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "settings", tr.settings, true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "quit", tr.quit, true, None::<&str>).unwrap(),
         ]
     } else {
         // Normal mode: all screenshot and video items
         vec![
-            MenuItem::with_id(app, "screenshot", format!("Скриншот области ({})", hotkeys.region), true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "screenshot_full", format!("Скриншот экрана ({})", hotkeys.fullscreen), true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "screenshot_window", format!("Скриншот окна ({})", hotkeys.window), true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "video_screen", "Запись экрана", true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "video_region", "Запись области", true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "video_window", "Запись окна", true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "settings", "Настройки...", true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "screenshot", format!("{} ({})", tr.screenshot_region, hotkeys.region), true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "screenshot_full", format!("{} ({})", tr.screenshot_fullscreen, hotkeys.fullscreen), true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "screenshot_window", format!("{} ({})", tr.screenshot_window, hotkeys.window), true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "video_screen", tr.video_screen, true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "video_region", tr.video_region, true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "video_window", tr.video_window, true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "settings", tr.settings, true, None::<&str>).unwrap(),
+            MenuItem::with_id(app, "quit", tr.quit, true, None::<&str>).unwrap(),
         ]
     };
 
@@ -558,7 +563,7 @@ fn open_video_result_window(app: &AppHandle, _path: &str) -> Result<(), String> 
         "video-result",
         WebviewUrl::App("index.html#/video-result".into()),
     )
-    .title("Запись завершена")
+    .title(crate::i18n::current(app).recording_finished)
     .inner_size(560.0, 480.0)
     .resizable(true)
     .center()

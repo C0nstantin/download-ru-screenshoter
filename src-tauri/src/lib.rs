@@ -1,4 +1,5 @@
 mod commands;
+pub mod i18n;
 mod state;
 mod upload;
 
@@ -108,14 +109,15 @@ pub fn run() {
             let handle = app.handle().clone();
 
             // Create tray menu - without "show window" option
-            let snap_i = MenuItem::with_id(&handle, "screenshot", "Скриншот области (Ctrl+Shift+4)", true, None::<&str>)?;
-            let snap_full_i = MenuItem::with_id(&handle, "screenshot_full", "Скриншот экрана (Ctrl+Shift+3)", true, None::<&str>)?;
-            let snap_win_i = MenuItem::with_id(&handle, "screenshot_window", "Скриншот окна (Ctrl+Shift+Alt+3)", true, None::<&str>)?;
-            let video_screen_i = MenuItem::with_id(&handle, "video_screen", "Запись экрана", true, None::<&str>)?;
-            let video_region_i = MenuItem::with_id(&handle, "video_region", "Запись области", true, None::<&str>)?;
-            let video_window_i = MenuItem::with_id(&handle, "video_window", "Запись окна", true, None::<&str>)?;
-            let settings_i = MenuItem::with_id(&handle, "settings", "Настройки...", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(&handle, "quit", "Выйти", true, None::<&str>)?;
+            let tr = i18n::current(&handle);
+            let snap_i = MenuItem::with_id(&handle, "screenshot", format!("{} (Ctrl+Shift+4)", tr.screenshot_region), true, None::<&str>)?;
+            let snap_full_i = MenuItem::with_id(&handle, "screenshot_full", format!("{} (Ctrl+Shift+3)", tr.screenshot_fullscreen), true, None::<&str>)?;
+            let snap_win_i = MenuItem::with_id(&handle, "screenshot_window", format!("{} (Ctrl+Shift+Alt+3)", tr.screenshot_window), true, None::<&str>)?;
+            let video_screen_i = MenuItem::with_id(&handle, "video_screen", tr.video_screen, true, None::<&str>)?;
+            let video_region_i = MenuItem::with_id(&handle, "video_region", tr.video_region, true, None::<&str>)?;
+            let video_window_i = MenuItem::with_id(&handle, "video_window", tr.video_window, true, None::<&str>)?;
+            let settings_i = MenuItem::with_id(&handle, "settings", tr.settings, true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(&handle, "quit", tr.quit, true, None::<&str>)?;
 
             let menu = Menu::with_items(&handle, &[&snap_i, &snap_full_i, &snap_win_i, &video_screen_i, &video_region_i, &video_window_i, &settings_i, &quit_i])?;
 
@@ -250,6 +252,7 @@ pub fn run() {
             commands::recording::delete_recording,
             commands::recording::toggle_mute_mic,
             commands::recording::is_mic_muted,
+            set_locale,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -281,6 +284,17 @@ fn parse_byte_range(range: &str, file_size: u64) -> (u64, u64) {
         .and_then(|s| if s.is_empty() { None } else { s.parse().ok() })
         .unwrap_or(file_size.saturating_sub(1));
     (start, end.min(file_size.saturating_sub(1)))
+}
+
+#[tauri::command]
+fn set_locale(app: AppHandle, locale: String) {
+    let state = app.state::<AppState>();
+    {
+        let mut l = state.locale.lock().unwrap();
+        *l = locale;
+    }
+    // Rebuild tray menu in new language
+    commands::recording::set_tray_recording_mode(&app, false);
 }
 
 fn show_settings_window(app: &AppHandle) {

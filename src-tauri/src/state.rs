@@ -11,6 +11,7 @@ pub struct AppState {
     pub last_recording_path: Mutex<Option<String>>,
     /// Saved system input volume before muting (to restore on stop/unmute)
     pub saved_input_volume: Mutex<Option<u32>>,
+    pub locale: Mutex<String>,
 }
 
 impl Default for AppState {
@@ -24,6 +25,7 @@ impl Default for AppState {
             recording_path: Mutex::new(None),
             last_recording_path: Mutex::new(None),
             saved_input_volume: Mutex::new(None),
+            locale: Mutex::new("ru".to_string()),
         }
     }
 }

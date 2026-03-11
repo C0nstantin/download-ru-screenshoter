@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "../i18n/useTranslation";
 
 function RecordingPage() {
   const [stopping, setStopping] = useState(false);
   const [muted, setMuted] = useState(false);
+  const { t } = useTranslation();
 
   useEffect(() => {
     invoke<boolean>("is_mic_muted").then(setMuted).catch(() => {});
@@ -50,12 +52,12 @@ function RecordingPage() {
         flexShrink: 0,
       }} />
       <span style={{ color: "#fff", fontSize: 13, fontWeight: 500, flex: 1 }}>
-        {stopping ? "Завершение..." : "Запись..."}
+        {stopping ? t("recording.stopping") : t("recording.recording")}
       </span>
       <button
         onClick={handleToggleMute}
         disabled={stopping}
-        title={muted ? "Включить микрофон" : "Выключить микрофон"}
+        title={muted ? t("recording.enableMic") : t("recording.disableMic")}
         style={{
           background: muted ? "#7f1d1d" : "#2a2a3e",
           color: "#fff",
@@ -85,7 +87,7 @@ function RecordingPage() {
           opacity: stopping ? 0.6 : 1,
         }}
       >
-        Стоп
+        {t("recording.stop")}
       </button>
       <style>{`
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }

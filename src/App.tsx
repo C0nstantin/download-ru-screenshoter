@@ -1,13 +1,21 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import MainPage from "./pages/MainPage";
 import OverlayPage from "./pages/OverlayPage";
 import EditorPage from "./pages/EditorPage";
 import RecordingPage from "./pages/RecordingPage";
 import VideoResultPage from "./pages/VideoResultPage";
+import { useI18nStore } from "./i18n/i18nStore";
 import "./App.css";
 
 function App() {
   const [route, setRoute] = useState<string>("/");
+  const locale = useI18nStore((s) => s.locale);
+
+  // Sync locale to Rust backend
+  useEffect(() => {
+    invoke("set_locale", { locale }).catch(() => {});
+  }, [locale]);
 
   useEffect(() => {
     const allowedRoutes = ["/", "/overlay", "/overlay-video", "/editor", "/recording", "/video-result"];

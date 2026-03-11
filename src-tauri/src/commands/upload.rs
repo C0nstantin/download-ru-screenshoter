@@ -95,7 +95,7 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
         "oauth",
         tauri::WebviewUrl::External(url.parse().map_err(|e| format!("URL error: {}", e))?),
     )
-    .title("Авторизация download.ru")
+    .title(crate::i18n::current(&app).oauth_title)
     .inner_size(900.0, 650.0)
     .visible(true)
     .initialization_script(init_script)
@@ -361,7 +361,7 @@ pub fn logout(
             "https://download.ru/users/sign_out".parse().map_err(|e| format!("URL error: {}", e))?
         ),
     )
-    .title("Выход...")
+    .title(crate::i18n::current(&app).signout_title)
     .inner_size(400.0, 300.0)
     .build()
     .map_err(|e| format!("Failed to open signout window: {}", e))?;

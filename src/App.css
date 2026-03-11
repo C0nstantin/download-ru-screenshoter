@@ -513,7 +513,7 @@ input[type="range"] {
 
 /* Drag & Drop */
 .editor-page.dragging-over::before {
-  content: "Перетащите изображение сюда";
+  content: attr(data-drop-hint);
   position: fixed;
   top: 0;
   left: 0;

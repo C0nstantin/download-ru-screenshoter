@@ -142,24 +142,26 @@ pub fn set_hotkeys(app: AppHandle, config: HotkeyConfig) -> Result<(), String> {
     }
 
     // Parse and register new shortcuts
+    let tr = crate::i18n::current(&app);
+
     let region_shortcut = parse_shortcut(&config.region)
-        .ok_or_else(|| format!("Неверный формат горячей клавиши: {}", config.region))?;
+        .ok_or_else(|| format!("{}: {}", tr.invalid_hotkey_format, config.region))?;
     let fullscreen_shortcut = parse_shortcut(&config.fullscreen)
-        .ok_or_else(|| format!("Неверный формат горячей клавиши: {}", config.fullscreen))?;
+        .ok_or_else(|| format!("{}: {}", tr.invalid_hotkey_format, config.fullscreen))?;
     let window_shortcut = parse_shortcut(&config.window)
-        .ok_or_else(|| format!("Неверный формат горячей клавиши: {}", config.window))?;
+        .ok_or_else(|| format!("{}: {}", tr.invalid_hotkey_format, config.window))?;
 
     app.global_shortcut()
         .register(region_shortcut)
-        .map_err(|e| format!("Не удалось зарегистрировать {}: {}", config.region, e))?;
+        .map_err(|e| format!("{} {}: {}", tr.failed_to_register, config.region, e))?;
 
     app.global_shortcut()
         .register(fullscreen_shortcut)
-        .map_err(|e| format!("Не удалось зарегистрировать {}: {}", config.fullscreen, e))?;
+        .map_err(|e| format!("{} {}: {}", tr.failed_to_register, config.fullscreen, e))?;
 
     app.global_shortcut()
         .register(window_shortcut)
-        .map_err(|e| format!("Не удалось зарегистрировать {}: {}", config.window, e))?;
+        .map_err(|e| format!("{} {}: {}", tr.failed_to_register, config.window, e))?;
 
     // Save to store
     let store = app.store("settings.json").map_err(|e| e.to_string())?;

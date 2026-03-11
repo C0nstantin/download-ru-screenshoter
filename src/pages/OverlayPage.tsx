@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useTranslation } from "../i18n/useTranslation";
 
 interface ScreenshotData {
   base64: string;
@@ -21,6 +22,7 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
   const [isSelecting, setIsSelecting] = useState(false);
   const [selection, setSelection] = useState<SelectionRect | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const { t } = useTranslation();
 
   // Load screenshot on mount
   useEffect(() => {
@@ -264,6 +266,17 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
     ensureFocus();
   }, []);
 
+  const getHint = () => {
+    if (selection && !isSelecting) {
+      return mode === "video"
+        ? t("overlay.videoConfirmHint")
+        : t("overlay.screenshotConfirmHint");
+    }
+    return mode === "video"
+      ? t("overlay.videoSelectHint")
+      : t("overlay.screenshotSelectHint");
+  };
+
   return (
     <div
       className="overlay-page"
@@ -283,26 +296,20 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
       />
       {imageLoaded && (
         <div className="overlay-hint">
-          {selection && !isSelecting
-            ? mode === "video"
-              ? "Enter или двойной клик — начать запись • ПКМ/R — перевыбрать • ESC — отмена"
-              : "Enter или двойной клик — подтвердить • ПКМ/R — перевыбрать • ESC — отмена"
-            : mode === "video"
-              ? "Выделите область для записи видео • ESC — отмена"
-              : "Выделите область • ESC — отмена"}
+          {getHint()}
         </div>
       )}
       {/* Buttons for platforms where keyboard might not work */}
       {selection && !isSelecting && (
         <div className="overlay-buttons">
           <button onClick={confirmSelection} className="overlay-btn confirm">
-            ✓ Подтвердить
+            ✓ {t("overlay.confirm")}
           </button>
           <button onClick={() => setSelection(null)} className="overlay-btn reset">
-            ↺ Перевыбрать
+            ↺ {t("overlay.reselect")}
           </button>
           <button onClick={closeOverlay} className="overlay-btn cancel">
-            ✕ Отмена
+            ✕ {t("overlay.cancel")}
           </button>
         </div>
       )}

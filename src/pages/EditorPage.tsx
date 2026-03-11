@@ -8,6 +8,7 @@ import { sendNotification, isPermissionGranted, requestPermission } from "@tauri
 import { Stage, Layer, Image as KonvaImage, Arrow, Rect, Text, Transformer, Circle, Group } from "react-konva";
 import Konva from "konva";
 import { useEditorStore, Shape } from "../stores/editorStore";
+import { useTranslation } from "../i18n/useTranslation";
 
 // NumberMarker component - renders a numbered circle
 interface NumberMarkerProps {
@@ -156,6 +157,8 @@ function EditorPage() {
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
 
+  const { t } = useTranslation();
+
   const {
     tool,
     color,
@@ -198,12 +201,12 @@ function EditorPage() {
         };
         img.onerror = (e) => {
           console.error("Image load error:", e);
-          setError("Ошибка загрузки изображения");
+          setError(t("editor.imageLoadError"));
         };
       })
       .catch((err) => {
         console.error("Failed to get screenshot:", err);
-        setError("Не удалось загрузить скриншот: " + String(err));
+        setError(t("editor.screenshotLoadError", { msg: String(err) }));
       });
 
     // Clear shapes from previous session
@@ -482,7 +485,7 @@ function EditorPage() {
         await invoke("save_screenshot", { path, imageData: base64 });
         setError(null);
       } catch (err) {
-        setError(`Ошибка сохранения: ${err}`);
+        setError(t("editor.saveError", { msg: String(err) }));
       }
     }
   };
@@ -507,8 +510,8 @@ function EditorPage() {
     }
     if (permissionGranted) {
       sendNotification({
-        title: "Скриншот загружен",
-        body: `Ссылка скопирована: ${result.secure_url}`,
+        title: t("editor.screenshotUploaded"),
+        body: t("editor.linkCopied", { msg: result.secure_url }),
       });
     }
   };
@@ -532,13 +535,13 @@ function EditorPage() {
             try {
               await doUpload();
             } catch (err) {
-              setError(`Ошибка загрузки: ${err}`);
+              setError(t("editor.uploadError", { msg: String(err) }));
             } finally {
               setIsUploading(false);
             }
           } else {
             setIsUploading(false);
-            setError("Авторизация не удалась. Попробуйте ещё раз.");
+            setError(t("editor.authFailed"));
           }
         });
         return; // will finish in listener
@@ -559,23 +562,23 @@ function EditorPage() {
               try {
                 await doUpload();
               } catch (e) {
-                setError(`Ошибка загрузки: ${e}`);
+                setError(t("editor.uploadError", { msg: String(e) }));
               } finally {
                 setIsUploading(false);
               }
             } else {
               setIsUploading(false);
-              setError("Авторизация не удалась. Попробуйте ещё раз.");
+              setError(t("editor.authFailed"));
             }
           });
           return;
         } catch (authErr) {
-          setError(`Ошибка авторизации: ${authErr}`);
+          setError(t("editor.authError", { msg: String(authErr) }));
         }
       } else if (errorMsg.includes("network") || errorMsg.includes("connection") || errorMsg.includes("timeout")) {
-        setError("Ошибка сети. Проверьте подключение к интернету.");
+        setError(t("editor.networkError"));
       } else {
-        setError(`Ошибка загрузки: ${err}`);
+        setError(t("editor.uploadError", { msg: String(err) }));
       }
     } finally {
       setIsUploading(false);
@@ -608,10 +611,10 @@ function EditorPage() {
         permissionGranted = permission === "granted";
       }
       if (permissionGranted) {
-        sendNotification({ title: "Скопировано", body: "Изображение скопировано в буфер обмена" });
+        sendNotification({ title: t("editor.copied"), body: t("editor.imageCopied") });
       }
     } catch (err) {
-      setError(`Ошибка копирования: ${err}`);
+      setError(t("editor.copyError", { msg: String(err) }));
     }
   };
 
@@ -638,7 +641,7 @@ function EditorPage() {
 
     const file = files[0];
     if (!file.type.startsWith("image/")) {
-      setError("Можно загружать только изображения");
+      setError(t("editor.onlyImages"));
       return;
     }
 
@@ -660,13 +663,13 @@ function EditorPage() {
           setError(null);
         };
         img.onerror = () => {
-          setError("Не удалось загрузить изображение");
+          setError(t("editor.imageLoadFailed"));
         };
         img.src = dataUrl;
       };
       reader.readAsDataURL(file);
     } catch (err) {
-      setError(`Ошибка загрузки файла: ${err}`);
+      setError(t("editor.fileUploadError", { msg: String(err) }));
     }
   };
 
@@ -676,10 +679,10 @@ function EditorPage() {
       <div className="editor-page">
         <Toolbar />
         <div className="editor-canvas-container" ref={containerRef}>
-          <p style={{ color: '#888' }}>Загрузка...</p>
+          <p style={{ color: '#888' }}>{t("editor.loading")}</p>
         </div>
         <div className="editor-actions">
-          <button disabled>Загрузка...</button>
+          <button disabled>{t("editor.loading")}</button>
         </div>
       </div>
     );
@@ -688,6 +691,7 @@ function EditorPage() {
   return (
     <div
       className={`editor-page ${isDraggingOver ? "dragging-over" : ""}`}
+      data-drop-hint={t("editor.dropHint")}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -835,7 +839,7 @@ function EditorPage() {
           </Layer>
         </Stage>
         ) : (
-          <p style={{ color: '#888' }}>Подготовка...</p>
+          <p style={{ color: '#888' }}>{t("editor.preparing")}</p>
         )}
       </div>
 
@@ -845,33 +849,33 @@ function EditorPage() {
           <button
             onClick={() => setScale(1)}
             className="zoom-reset"
-            title="Сбросить масштаб (100%)"
+            title={t("editor.resetZoom")}
           >
             ⟲
           </button>
         </div>
-        <button onClick={handleCopyImage} title="Копировать изображение в буфер обмена" style={{ minWidth: 110 }}>
-          {copied ? "Скопировано ✓" : "📋 В буфер"}
+        <button onClick={handleCopyImage} title={t("editor.copyToClipboard")} style={{ minWidth: 110 }}>
+          {copied ? t("editor.copiedCheck") : `📋 ${t("editor.toClipboard")}`}
         </button>
-        <button onClick={handleSave}>Сохранить</button>
+        <button onClick={handleSave}>{t("editor.save")}</button>
         <button
           onClick={handleUpload}
           disabled={isUploading}
           className="primary"
         >
-          {isUploading ? "Загрузка..." : "Загрузить"}
+          {isUploading ? t("editor.uploading") : t("editor.upload")}
         </button>
         <button onClick={handleClose} className="secondary">
-          Закрыть
+          {t("editor.close")}
         </button>
       </div>
 
       {uploadResult && (
         <div className="upload-result success">
-          <p>Загружено! Ссылка скопирована в буфер.</p>
+          <p>{t("editor.uploadedLinkCopied")}</p>
           <div className="url-row">
             <input type="text" value={uploadResult.secure_url} readOnly />
-            <button onClick={handleCopyUrl}>📎 Копировать ссылку</button>
+            <button onClick={handleCopyUrl}>📎 {t("editor.copyLink")}</button>
           </div>
         </div>
       )}
@@ -881,7 +885,7 @@ function EditorPage() {
       {isUploading && (
         <div className="upload-overlay">
           <div className="spinner" />
-          <p>Загрузка на download.ru...</p>
+          <p>{t("editor.uploadingToDownload")}</p>
         </div>
       )}
 
@@ -909,7 +913,7 @@ function EditorPage() {
               if (e.key === "Enter") confirmTextInput();
               if (e.key === "Escape") { setTextInput(null); setTextValue(""); }
             }}
-            placeholder="Введите текст..."
+            placeholder={t("editor.enterText")}
             style={{ minWidth: 160, fontSize: 14, padding: "2px 6px" }}
           />
           <button onClick={confirmTextInput} style={{ padding: "2px 10px" }}>OK</button>

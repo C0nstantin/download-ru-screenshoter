@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "../i18n/useTranslation";
+import { useI18nStore, Locale } from "../i18n/i18nStore";
 
 interface HotkeyConfig {
   region: string;
@@ -19,6 +21,8 @@ function MainPage() {
   });
   const [editingHotkey, setEditingHotkey] = useState<"region" | "fullscreen" | "window" | null>(null);
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
+  const { t } = useTranslation();
+  const { locale, setLocale } = useI18nStore();
 
   useEffect(() => {
     invoke<boolean>("load_saved_token")
@@ -34,10 +38,10 @@ function MainPage() {
       setIsWaiting(false);
       if (event.payload) {
         setIsLoggedIn(true);
-        setStatus("Успешно авторизованы!");
+        setStatus(t("main.authSuccess"));
         setTimeout(() => setStatus(""), 3000);
       } else {
-        setStatus("Ошибка авторизации. Попробуйте ещё раз.");
+        setStatus(t("main.authError"));
       }
     });
 
@@ -51,7 +55,7 @@ function MainPage() {
       await invoke("open_oauth_browser");
     } catch (err) {
       setIsWaiting(false);
-      setStatus(`Ошибка: ${err}`);
+      setStatus(t("main.error", { msg: String(err) }));
     }
   };
 
@@ -59,10 +63,10 @@ function MainPage() {
     try {
       await invoke("logout");
       setIsLoggedIn(false);
-      setStatus("Выход выполнен");
+      setStatus(t("main.logoutDone"));
       setTimeout(() => setStatus(""), 3000);
     } catch (err) {
-      setStatus(`Ошибка: ${err}`);
+      setStatus(t("main.error", { msg: String(err) }));
     }
   };
 
@@ -93,7 +97,7 @@ function MainPage() {
     parts.push(normalized);
 
     if (parts.length < 2) {
-      setStatus("Нужно использовать модификатор (Ctrl, Cmd, Alt, Shift)");
+      setStatus(t("main.needModifier"));
       setTimeout(() => setStatus(""), 3000);
       return;
     }
@@ -104,8 +108,8 @@ function MainPage() {
     setEditingHotkey(null);
 
     invoke("set_hotkeys", { config: newHotkeys })
-      .then(() => { setStatus("Горячие клавиши сохранены!"); setTimeout(() => setStatus(""), 3000); })
-      .catch((err) => setStatus(`Ошибка: ${err}`));
+      .then(() => { setStatus(t("main.hotkeysSaved")); setTimeout(() => setStatus(""), 3000); })
+      .catch((err) => setStatus(t("main.error", { msg: String(err) })));
   };
 
   const startEditingHotkey = async (type: "region" | "fullscreen" | "window") => {
@@ -120,12 +124,18 @@ function MainPage() {
     invoke("set_hotkeys", { config: hotkeys }).catch(() => {});
   };
 
+  const hotkeyLabels: Record<string, string> = {
+    region: t("main.screenshotRegion"),
+    fullscreen: t("main.screenshotFullscreen"),
+    window: t("main.screenshotWindow"),
+  };
+
   return (
     <main className="main-page">
-      <h1>DownloadRu Screenshoter</h1>
+      <h1>{t("main.title")}</h1>
 
       <section className="section">
-        <h2>Горячие клавиши</h2>
+        <h2>{t("main.hotkeys")}</h2>
         <div className="shortcuts">
           {(["region", "fullscreen", "window"] as const).map((type) => (
             <div className="shortcut" key={type}>
@@ -134,7 +144,7 @@ function MainPage() {
                   ref={hotkeyInputRef}
                   type="text"
                   className="hotkey-input"
-                  placeholder="Нажмите комбинацию..."
+                  placeholder={t("main.hotkeyPlaceholder")}
                   onKeyDown={(e) => handleHotkeyKeyDown(e, type)}
                   onBlur={() => cancelEditingHotkey()}
                   readOnly
@@ -144,27 +154,25 @@ function MainPage() {
                   {hotkeys[type].split("+").map((k, i) => <kbd key={i}>{k}</kbd>)}
                 </button>
               )}
-              <span>
-                {type === "region" ? "Скриншот области" : type === "fullscreen" ? "Скриншот экрана" : "Скриншот окна"}
-              </span>
+              <span>{hotkeyLabels[type]}</span>
             </div>
           ))}
         </div>
-        <p className="hint" style={{ marginTop: "10px" }}>Кликните на комбинацию для изменения</p>
+        <p className="hint" style={{ marginTop: "10px" }}>{t("main.hotkeyHint")}</p>
       </section>
 
       <section className="section">
-        <h2>Аккаунт download.ru</h2>
+        <h2>{t("main.account")}</h2>
         {isLoggedIn ? (
           <div className="auth-status">
-            <p className="token-status success">Вы авторизованы</p>
-            <button onClick={handleLogout} className="danger">Выйти</button>
+            <p className="token-status success">{t("main.authorized")}</p>
+            <button onClick={handleLogout} className="danger">{t("main.logout")}</button>
           </div>
         ) : (
           <div className="auth-form">
-            <p className="hint">Войдите в аккаунт download.ru для загрузки скриншотов</p>
+            <p className="hint">{t("main.loginHint")}</p>
             <button onClick={handleLogin} className="primary" disabled={isWaiting}>
-              {isWaiting ? "Ожидаем авторизацию..." : "Войти через download.ru"}
+              {isWaiting ? t("main.waitingAuth") : t("main.loginButton")}
             </button>
           </div>
         )}
@@ -172,12 +180,27 @@ function MainPage() {
       </section>
 
       <section className="section">
-        <h2>Как использовать</h2>
+        <h2>{t("main.howToUse")}</h2>
         <ol>
-          <li>Нажмите {hotkeys.region.split("+").map((k, i) => <kbd key={i}>{k}</kbd>)} для выделения области</li>
-          <li>Отредактируйте скриншот (стрелки, рамки, текст)</li>
-          <li>Нажмите "Загрузить" - ссылка скопируется в буфер</li>
+          <li>{t("main.howToStep1", { hotkey: hotkeys.region })}</li>
+          <li>{t("main.howToStep2")}</li>
+          <li>{t("main.howToStep3")}</li>
         </ol>
+      </section>
+
+      <section className="section">
+        <h2>{t("main.language")}</h2>
+        <div style={{ display: "flex", gap: 8 }}>
+          {(["ru", "en"] as const).map((l) => (
+            <button
+              key={l}
+              className={locale === l ? "primary" : "secondary"}
+              onClick={() => setLocale(l as Locale)}
+            >
+              {l === "ru" ? "Русский" : "English"}
+            </button>
+          ))}
+        </div>
       </section>
     </main>
   );

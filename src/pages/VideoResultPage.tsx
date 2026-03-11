@@ -5,6 +5,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { sendNotification, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useTranslation } from "../i18n/useTranslation";
 
 interface VideoInfo {
   path: string;
@@ -36,6 +37,7 @@ function VideoResultPage() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { t } = useTranslation();
 
   useEffect(() => {
     invoke<string>("get_last_recording_path").then((path) => {
@@ -88,7 +90,7 @@ function VideoResultPage() {
     await writeText(url);
     let ok = await isPermissionGranted();
     if (!ok) { const p = await requestPermission(); ok = p === "granted"; }
-    if (ok) sendNotification({ title: "Видео загружено", body: `Ссылка скопирована` });
+    if (ok) sendNotification({ title: t("video.videoUploaded"), body: t("video.linkCopied") });
   };
 
   const handleUpload = async () => {
@@ -112,12 +114,12 @@ function VideoResultPage() {
               finally { setIsUploading(false); }
             } else {
               setIsUploading(false);
-              setError("Авторизация не удалась. Попробуйте ещё раз.");
+              setError(t("video.authFailed"));
             }
           });
           return;
         } catch (authErr) {
-          setError(`Ошибка авторизации: ${authErr}`);
+          setError(t("video.authError", { msg: String(authErr) }));
         }
       } else {
         setError(msg);
@@ -168,7 +170,7 @@ function VideoResultPage() {
           />
         ) : (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#555" }}>
-            Загрузка...
+            {t("video.loading")}
           </div>
         )}
       </div>
@@ -184,9 +186,9 @@ function VideoResultPage() {
       {/* Trim controls */}
       {duration > 0 && (
         <div style={{ background: "#12122a", borderRadius: 6, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>Обрезка</div>
+          <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>{t("video.trim")}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, color: "#888", width: 36 }}>Начало</span>
+            <span style={{ fontSize: 11, color: "#888", width: 36 }}>{t("video.trimStart")}</span>
             <input
               type="range" min={0} max={trimEnd - 0.1} step={0.1}
               value={trimStart}
@@ -200,7 +202,7 @@ function VideoResultPage() {
             <span style={{ fontSize: 11, color: "#aaa", width: 36, textAlign: "right" }}>{fmtTime(trimStart)}</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, color: "#888", width: 36 }}>Конец</span>
+            <span style={{ fontSize: 11, color: "#888", width: 36 }}>{t("video.trimEnd")}</span>
             <input
               type="range" min={trimStart + 0.1} max={duration} step={0.1}
               value={trimEnd}
@@ -215,7 +217,7 @@ function VideoResultPage() {
           </div>
           {hasTrim && (
             <div style={{ fontSize: 11, color: "#60a5fa" }}>
-              Будет вырезано: {fmtTime(trimStart)} — {fmtTime(trimEnd)} ({fmtTime(trimEnd - trimStart)})
+              {t("video.willTrim", { start: fmtTime(trimStart), end: fmtTime(trimEnd), duration: fmtTime(trimEnd - trimStart) })}
             </div>
           )}
         </div>
@@ -231,7 +233,7 @@ function VideoResultPage() {
             {uploadUrl}
           </span>
           <button onClick={() => { writeText(uploadUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }} style={{ ...btnSm, minWidth: 110 }}>
-            {copied ? "Скопировано ✓" : "Копировать"}
+            {copied ? t("video.copiedCheck") : t("video.copy")}
           </button>
         </div>
       )}
@@ -254,13 +256,13 @@ function VideoResultPage() {
             borderRadius: 6, padding: "5px 8px", fontSize: 12, cursor: "pointer",
           }}
         >
-          <option value="high">MP4 Высокое</option>
-          <option value="medium">MP4 Среднее (1080p)</option>
-          <option value="low">MP4 Низкое (720p)</option>
+          <option value="high">{t("video.qualityHigh")}</option>
+          <option value="medium">{t("video.qualityMedium")}</option>
+          <option value="low">{t("video.qualityLow")}</option>
         </select>
 
         <button onClick={handleConvert} disabled={isConverting} style={btn}>
-          {isConverting ? "Конвертация..." : hasTrim ? "Обрезать и конвертировать" : "Конвертировать в MP4"}
+          {isConverting ? t("video.converting") : hasTrim ? t("video.trimAndConvert") : t("video.convertToMp4")}
         </button>
 
         <div style={{ flex: 1 }} />
@@ -270,9 +272,9 @@ function VideoResultPage() {
           disabled={isUploading || !!uploadUrl}
           style={{ ...btn, background: "#2563eb", fontWeight: 600 }}
         >
-          {isUploading ? "Загрузка..." : uploadUrl ? "Загружено ✓" : "Загрузить"}
+          {isUploading ? t("video.uploadingDots") : uploadUrl ? t("video.uploadedCheck") : t("video.upload")}
         </button>
-        <button onClick={handleSave} style={btn}>Сохранить...</button>
+        <button onClick={handleSave} style={btn}>{t("video.saveDots")}</button>
         <button onClick={handleDelete} style={{ ...btn, background: "#7f1d1d" }}>✕</button>
       </div>
     </div>

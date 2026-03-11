@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { useEditorStore, Tool } from "../stores/editorStore";
+import { useTranslation } from "../i18n/useTranslation";
 
 const CursorIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -7,13 +8,13 @@ const CursorIcon = () => (
   </svg>
 );
 
-const tools: { id: Tool; label: string; icon: ReactNode }[] = [
-  { id: "select", label: "Выбор", icon: <CursorIcon /> },
-  { id: "arrow", label: "Стрелка", icon: "→" },
-  { id: "rect", label: "Рамка", icon: "□" },
-  { id: "text", label: "Текст", icon: "T" },
-  { id: "number", label: "Номер", icon: "①" },
-  { id: "blur", label: "Размытие", icon: "▦" },
+const toolDefs: { id: Tool; labelKey: string; icon: ReactNode }[] = [
+  { id: "select", labelKey: "toolbar.select", icon: <CursorIcon /> },
+  { id: "arrow", labelKey: "toolbar.arrow", icon: "→" },
+  { id: "rect", labelKey: "toolbar.rect", icon: "□" },
+  { id: "text", labelKey: "toolbar.text", icon: "T" },
+  { id: "number", labelKey: "toolbar.number", icon: "①" },
+  { id: "blur", labelKey: "toolbar.blur", icon: "▦" },
 ];
 
 const colors = [
@@ -30,27 +31,28 @@ const colors = [
 function Toolbar() {
   const { tool, color, strokeWidth, fontSize, setTool, setColor, setStrokeWidth, setFontSize } =
     useEditorStore();
+  const { t } = useTranslation();
 
   return (
     <div className="toolbar">
       <div className="toolbar-section">
-        <span className="toolbar-label">Инструмент:</span>
+        <span className="toolbar-label">{t("toolbar.tool")}</span>
         <div className="tool-buttons">
-          {tools.map((t) => (
+          {toolDefs.map((td) => (
             <button
-              key={t.id}
-              className={`tool-btn ${tool === t.id ? "active" : ""}`}
-              onClick={() => setTool(t.id)}
-              title={t.label}
+              key={td.id}
+              className={`tool-btn ${tool === td.id ? "active" : ""}`}
+              onClick={() => setTool(td.id)}
+              title={t(td.labelKey)}
             >
-              {t.icon}
+              {td.icon}
             </button>
           ))}
         </div>
       </div>
 
       <div className="toolbar-section">
-        <span className="toolbar-label">Цвет:</span>
+        <span className="toolbar-label">{t("toolbar.color")}</span>
         <div className="color-buttons">
           {colors.map((c) => (
             <button
@@ -64,7 +66,7 @@ function Toolbar() {
       </div>
 
       <div className="toolbar-section">
-        <span className="toolbar-label">Толщина:</span>
+        <span className="toolbar-label">{t("toolbar.thickness")}</span>
         <input
           type="range"
           min="1"
@@ -77,7 +79,7 @@ function Toolbar() {
 
       {tool === "text" && (
         <div className="toolbar-section">
-          <span className="toolbar-label">Шрифт:</span>
+          <span className="toolbar-label">{t("toolbar.font")}</span>
           <input
             type="range"
             min="10"
