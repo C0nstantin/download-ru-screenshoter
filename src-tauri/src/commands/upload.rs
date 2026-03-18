@@ -1,13 +1,15 @@
 use reqwest::multipart;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{Engine as _, engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD}};
+use sha2::{Sha256, Digest};
 
 use crate::state::AppState;
 
-// OAuth credentials loaded from environment at build time, with XOR obfuscation at rest.
-// To set: export OAUTH_CLIENT_ID=... OAUTH_CLIENT_SECRET=... before `cargo build`.
-// Falls back to built-in (obfuscated) defaults for development.
+// OAuth client_id loaded from environment at build time, with XOR obfuscation at rest.
+// To set: export OAUTH_CLIENT_ID=... before `cargo build`.
+// Falls back to built-in (obfuscated) default for development.
+// Note: client_secret is no longer needed — this is a public PKCE client.
 fn oauth_client_id() -> String {
     if let Ok(val) = std::env::var("OAUTH_CLIENT_ID") {
         return val;
@@ -20,18 +22,6 @@ fn oauth_client_id() -> String {
     ])
 }
 
-fn oauth_client_secret() -> String {
-    if let Ok(val) = std::env::var("OAUTH_CLIENT_SECRET") {
-        return val;
-    }
-    deobfuscate(&[
-        0xa1, 0xf6, 0xa1, 0xa7, 0xf0, 0xa6, 0xf4, 0xa7, 0xfa, 0xf6, 0xf4, 0xf3, 0xf7, 0xa5, 0xa5, 0xf5,
-        0xa0, 0xf0, 0xa1, 0xf0, 0xfb, 0xa7, 0xf6, 0xa5, 0xfb, 0xfa, 0xf0, 0xa0, 0xf3, 0xf3, 0xfa, 0xf7,
-        0xa0, 0xf0, 0xfa, 0xa7, 0xf3, 0xf3, 0xf1, 0xf0, 0xa2, 0xfb, 0xa5, 0xa1, 0xf3, 0xf7, 0xf5, 0xa7,
-        0xf6, 0xf4, 0xf4, 0xa0, 0xf1, 0xa7, 0xf0, 0xfb, 0xa0, 0xf6, 0xf6, 0xfb, 0xf5, 0xfb, 0xf1, 0xf0,
-    ])
-}
-
 /// XOR-deobfuscate a byte slice back to the original string.
 /// Not encryption — just prevents plaintext secrets in binary/source grep.
 const OBFUSCATION_KEY: u8 = 0xC3;
@@ -39,8 +29,24 @@ fn deobfuscate(data: &[u8]) -> String {
     data.iter().map(|b| (b ^ OBFUSCATION_KEY) as char).collect()
 }
 
-const REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
+const REDIRECT_URI: &str = "download-screenshoter://auth/callback";
 const STORE_FILE: &str = "auth.json";
+
+/// Generate a PKCE code_verifier (43 base64url chars from 32 random bytes).
+fn generate_code_verifier() -> String {
+    let bytes: Vec<u8> = [
+        uuid::Uuid::new_v4().as_bytes().as_slice(),
+        uuid::Uuid::new_v4().as_bytes().as_slice(),
+    ].concat();
+    URL_SAFE_NO_PAD.encode(&bytes)
+}
+
+/// Compute code_challenge = base64url(sha256(code_verifier)) for PKCE S256.
+fn compute_code_challenge(verifier: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(verifier.as_bytes());
+    URL_SAFE_NO_PAD.encode(hasher.finalize())
+}
 
 #[derive(serde::Deserialize)]
 struct TokenResponse {
@@ -52,43 +58,27 @@ struct TokenResponse {
     expires_in: Option<u64>,
 }
 
-/// Open internal webview for OAuth — intercepts redirect with code automatically
+/// Open internal webview for OAuth with PKCE — intercepts redirect to custom URI scheme.
+/// Flow: webview → login → Doorkeeper redirects to download-screenshoter://auth/callback?code=...
+/// → on_navigation catches it → exchange code with code_verifier → token saved.
 #[tauri::command]
 pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    // URL-encode the redirect_uri value in the query string
+    let code_verifier = generate_code_verifier();
+    let code_challenge = compute_code_challenge(&code_verifier);
+
     let encoded_redirect = REDIRECT_URI
         .replace(':', "%3A")
         .replace('/', "%2F");
+    let base = crate::config::api_base_url();
     let url = format!(
-        "https://download.ru/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=",
-        oauth_client_id(), encoded_redirect
+        "{}/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=&code_challenge={}&code_challenge_method=S256",
+        base, oauth_client_id(), encoded_redirect, code_challenge
     );
 
     let app_clone = app.clone();
     let token_arc = state.access_token.clone();
-    // Flag to prevent processing the same code twice (init_script + polling race)
     let code_captured = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let code_captured_close = std::sync::Arc::clone(&code_captured);
-
-    // Only capture code= from URL params on page load (safe, no false positives).
-    // Full page scan is done by Rust-side polling via eval() after user clicks Allow.
-    // Wrapped in DOMContentLoaded + setTimeout for WebView2 (Windows) timing reliability.
-    let init_script = r#"
-        (function() {
-            function checkCode() {
-                var params = new URLSearchParams(window.location.search);
-                var code = params.get('code');
-                if (code) {
-                    window.location = 'oauth-capture://code?code=' + encodeURIComponent(code);
-                }
-            }
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', function() { setTimeout(checkCode, 100); });
-            } else {
-                setTimeout(checkCode, 100);
-            }
-        })();
-    "#;
 
     let win = tauri::WebviewWindowBuilder::new(
         &app,
@@ -98,19 +88,15 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
     .title(crate::i18n::current(&app).oauth_title)
     .inner_size(900.0, 650.0)
     .visible(true)
-    .initialization_script(init_script)
     .on_navigation(move |nav_url| {
-        let code_captured_nav = code_captured.clone();
-        let code_captured_poll = code_captured.clone();
         let url_str = nav_url.as_str();
         #[cfg(debug_assertions)]
         println!("OAuth nav: {}", url_str);
 
-        // Catch our custom scheme (triggered by init_script or polling eval)
-        if url_str.starts_with("oauth-capture://") {
-            // Atomically set captured flag — only process once
-            if code_captured_nav.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                return false; // already captured, ignore duplicate
+        // Catch the redirect to our custom URI scheme (download-screenshoter://auth/callback?code=...)
+        if url_str.starts_with(REDIRECT_URI) || url_str.starts_with("download-screenshoter://") {
+            if code_captured.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return false;
             }
 
             let code = url_str
@@ -125,8 +111,9 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
             if let Some(code) = code {
                 let app2 = app_clone.clone();
                 let token_arc2 = token_arc.clone();
+                let verifier = code_verifier.clone();
                 tauri::async_runtime::spawn(async move {
-                    match exchange_code_internal(code, &app2, token_arc2).await {
+                    match exchange_code_internal(code, verifier, &app2, token_arc2).await {
                         Ok(_) => { let _ = app2.emit("oauth-complete", true); }
                         Err(e) => {
                             eprintln!("OAuth error: {}", e);
@@ -139,60 +126,6 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
                 });
             }
             return false;
-        }
-
-        // When user reaches the oauth/authorize page — start polling for the code
-        // after user clicks Allow. Polls every 1s for up to 90s.
-        if url_str.contains("download.ru/oauth/authorize") {
-            let app2 = app_clone.clone();
-            let captured2 = code_captured_poll.clone();
-            tauri::async_runtime::spawn(async move {
-                // Wait a bit for page to fully load
-                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-
-                // JS: only capture code from specific "code display" elements,
-                // NOT from form fields or general HTML (avoids false positives).
-                let check_js = r#"
-                    (function() {
-                        var code = null;
-                        // 1. URL param (safest)
-                        var p = new URLSearchParams(window.location.search);
-                        code = p.get('code');
-                        // 2. <code> or <pre> tag containing exactly a 64-char hex (OOB display)
-                        if (!code) {
-                            var els = document.querySelectorAll('code, pre, .oauth-code, [class*="auth-code"], [class*="access-code"]');
-                            for (var i = 0; i < els.length; i++) {
-                                var t = (els[i].textContent || '').trim();
-                                if (/^[0-9a-f]{64}$/i.test(t)) { code = t; break; }
-                            }
-                        }
-                        // 3. read-only text input (common for OOB display)
-                        if (!code) {
-                            var inputs = document.querySelectorAll('input[readonly], input[type="text"][disabled]');
-                            for (var i = 0; i < inputs.length; i++) {
-                                var v = inputs[i].value || '';
-                                if (/^[0-9a-f]{64}$/i.test(v)) { code = v; break; }
-                            }
-                        }
-                        if (code) {
-                            window.location = 'oauth-capture://code?code=' + encodeURIComponent(code);
-                        }
-                    })();
-                "#;
-
-                for _ in 0..90u32 {
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    // Stop if code was already captured (by init_script or previous poll)
-                    if captured2.load(std::sync::atomic::Ordering::SeqCst) {
-                        break;
-                    }
-                    if let Some(w) = app2.get_webview_window("oauth") {
-                        let _ = w.eval(check_js);
-                    } else {
-                        break;
-                    }
-                }
-            });
         }
 
         true
@@ -235,16 +168,17 @@ fn urlencoding_decode(s: &str) -> String {
 
 async fn exchange_code_internal(
     code: String,
+    code_verifier: String,
     app: &AppHandle,
     token_arc: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
     let response = client
-        .post("https://download.ru/oauth/token")
+        .post(format!("{}/oauth/token", crate::config::api_base_url()))
         .form(&[
             ("client_id", oauth_client_id()),
-            ("client_secret", oauth_client_secret()),
             ("code", code),
+            ("code_verifier", code_verifier),
             ("redirect_uri", REDIRECT_URI.to_string()),
             ("grant_type", "authorization_code".to_string()),
         ])
@@ -294,10 +228,9 @@ pub async fn refresh_oauth_token(
 
     let client = reqwest::Client::new();
     let response = client
-        .post("https://download.ru/oauth/token")
+        .post(format!("{}/oauth/token", crate::config::api_base_url()))
         .form(&[
             ("client_id", oauth_client_id()),
-            ("client_secret", oauth_client_secret()),
             ("refresh_token", refresh_token),
             ("grant_type", "refresh_token".to_string()),
         ])
@@ -358,7 +291,8 @@ pub fn logout(
         &app,
         "signout",
         tauri::WebviewUrl::External(
-            "https://download.ru/users/sign_out".parse().map_err(|e| format!("URL error: {}", e))?
+            format!("{}/users/sign_out", crate::config::api_base_url())
+                .parse().map_err(|e| format!("URL error: {}", e))?
         ),
     )
     .title(crate::i18n::current(&app).signout_title)
@@ -438,7 +372,7 @@ pub async fn get_or_create_screenshots_folder_pub(client: &reqwest::Client, toke
 async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str) -> Result<String, String> {
     // List root folder contents
     let resp = client
-        .get("https://download.ru/folders.json")
+        .get(format!("{}/folders.json", crate::config::api_base_url()))
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/json")
         .send()
@@ -463,7 +397,7 @@ async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str)
     #[cfg(debug_assertions)]
     println!("Creating Screenshots folder...");
     let resp = client
-        .post("https://download.ru/folders.json")
+        .post(format!("{}/folders.json", crate::config::api_base_url()))
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/json")
         .form(&[("folder[name]", "Screenshots")])
@@ -530,7 +464,7 @@ pub async fn upload_to_download(
         .part("files[]", file_part);
 
     // POST /fast_upload?parent_id=<id>
-    let url = format!("https://download.ru/fast_upload?parent_id={}", parent_id);
+    let url = format!("{}/fast_upload?parent_id={}", crate::config::api_base_url(), parent_id);
     #[cfg(debug_assertions)]
     println!("POST {}", url);
 
@@ -559,7 +493,7 @@ pub async fn upload_to_download(
 
     // secure_url may be relative like /g/xxx... - prepend domain
     let secure_url = if api_response.object.secure_url.starts_with('/') {
-        format!("https://download.ru{}", api_response.object.secure_url)
+        format!("{}{}", crate::config::api_base_url(), api_response.object.secure_url)
     } else {
         api_response.object.secure_url
     };

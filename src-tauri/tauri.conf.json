@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' localfile: http://localfile.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' localfile: http://localfile.localhost blob:; connect-src 'self' https://download.ru; font-src 'self'; frame-ancestors 'none'"
+      "csp": "default-src 'self' localfile: http://localfile.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' localfile: http://localfile.localhost blob:; connect-src 'self' https://download.ru https://beta.download.ru https://*.download.ru; font-src 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {

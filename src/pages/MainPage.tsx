@@ -21,6 +21,8 @@ function MainPage() {
   });
   const [editingHotkey, setEditingHotkey] = useState<"region" | "fullscreen" | "window" | null>(null);
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
+  const [devMode, setDevMode] = useState(false);
+  const [isBeta, setIsBeta] = useState(false);
   const { t } = useTranslation();
   const { locale, setLocale } = useI18nStore();
 
@@ -32,6 +34,13 @@ function MainPage() {
     invoke<HotkeyConfig>("get_hotkeys")
       .then(setHotkeys)
       .catch(console.error);
+
+    invoke<boolean>("is_dev_mode").then((dm) => {
+      setDevMode(dm);
+      if (dm) {
+        invoke<string>("get_api_url").then((url) => setIsBeta(url.includes("beta.")));
+      }
+    });
 
     // Auto-capture when OAuth completes in webview
     const unlisten = listen<boolean>("oauth-complete", (event) => {
@@ -202,6 +211,29 @@ function MainPage() {
           ))}
         </div>
       </section>
+
+      {devMode && (
+        <section className="section" style={{ borderTop: "1px dashed #ccc", marginTop: 12, paddingTop: 12 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={isBeta}
+              onChange={async (e) => {
+                const useBeta = e.target.checked;
+                setIsBeta(useBeta);
+                try {
+                  const newUrl = await invoke<string>("toggle_beta_server", { useBeta });
+                  setStatus(`API: ${newUrl}`);
+                  setTimeout(() => setStatus(""), 3000);
+                } catch (err) {
+                  setStatus(t("main.error", { msg: String(err) }));
+                }
+              }}
+            />
+            Beta сервер (beta.download.ru)
+          </label>
+        </section>
+      )}
     </main>
   );
 }

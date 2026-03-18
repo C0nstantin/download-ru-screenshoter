@@ -503,7 +503,7 @@ pub async fn upload_video_to_download(
 
     let form = reqwest::multipart::Form::new().part("files[]", file_part);
 
-    let url = format!("https://download.ru/fast_upload?parent_id={}", parent_id);
+    let url = format!("{}/fast_upload?parent_id={}", crate::config::api_base_url(), parent_id);
     let response = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -530,7 +530,7 @@ pub async fn upload_video_to_download(
         .to_string();
 
     let url = if secure_url.starts_with('/') {
-        format!("https://download.ru{}", secure_url)
+        format!("{}{}", crate::config::api_base_url(), secure_url)
     } else {
         secure_url
     };

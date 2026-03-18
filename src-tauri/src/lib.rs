@@ -1,4 +1,5 @@
 mod commands;
+pub mod config;
 pub mod i18n;
 mod state;
 mod upload;
@@ -176,6 +177,9 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Initialize API base URL from env var or stored preference
+            config::init(&handle);
+
             // Start as tray-only app (no Dock icon, no Cmd+Tab entry)
             #[cfg(target_os = "macos")]
             let _ = app.handle().set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -253,6 +257,9 @@ pub fn run() {
             commands::recording::toggle_mute_mic,
             commands::recording::is_mic_muted,
             set_locale,
+            is_dev_mode,
+            get_api_url,
+            toggle_beta_server,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -295,6 +302,34 @@ fn set_locale(app: AppHandle, locale: String) {
     }
     // Rebuild tray menu in new language
     commands::recording::set_tray_recording_mode(&app, false);
+}
+
+#[tauri::command]
+fn is_dev_mode() -> bool {
+    cfg!(feature = "dev_mode")
+}
+
+#[tauri::command]
+fn get_api_url() -> String {
+    config::api_base_url()
+}
+
+#[tauri::command]
+fn toggle_beta_server(app: AppHandle, use_beta: bool) -> String {
+    let new_url = config::toggle_beta(use_beta);
+
+    // Persist choice in store (dev_mode only)
+    #[cfg(feature = "dev_mode")]
+    {
+        use tauri_plugin_store::StoreExt;
+        if let Ok(store) = app.store("settings.json") {
+            let _ = store.set("api_base_url", serde_json::json!(new_url));
+            let _ = store.save();
+        }
+    }
+
+    let _ = &app; // suppress unused warning in release
+    new_url
 }
 
 fn show_settings_window(app: &AppHandle) {
