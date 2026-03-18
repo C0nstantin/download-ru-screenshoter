@@ -468,8 +468,40 @@ function EditorPage() {
 
   const getStageDataUrl = (): string => {
     if (!stageRef.current || scale === null) return "";
-    // Export at original size regardless of display scale
-    return stageRef.current.toDataURL({ pixelRatio: 1 / scale });
+    // Export at original size — toCanvas returns a canvas element synchronously
+    const c = stageRef.current.toCanvas({ pixelRatio: 1 / scale });
+    const ctx = c.getContext("2d")!;
+
+    // Add "download.ru" watermark in bottom-right corner
+    // Uses white outline + dark fill + shadow — visible on any background
+    const fontSize = Math.max(16, Math.round(c.height * 0.045));
+    ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    const text = "download.ru";
+    const pad = Math.round(fontSize * 0.7);
+    const metrics = ctx.measureText(text);
+    const tx = c.width - metrics.width - pad;
+    const ty = c.height - pad;
+
+    ctx.textBaseline = "alphabetic";
+
+    // Shadow for depth
+    ctx.shadowColor = "rgba(0,0,0,0.4)";
+    ctx.shadowBlur = fontSize * 0.3;
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 1;
+
+    // White outline (visible on dark backgrounds)
+    ctx.strokeStyle = "rgba(255,255,255,0.6)";
+    ctx.lineWidth = fontSize * 0.15;
+    ctx.lineJoin = "round";
+    ctx.strokeText(text, tx, ty);
+
+    // Dark fill (visible on light backgrounds)
+    ctx.shadowColor = "transparent";
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillText(text, tx, ty);
+
+    return c.toDataURL("image/png");
   };
 
   const handleSave = async () => {
