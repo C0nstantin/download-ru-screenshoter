@@ -1,6 +1,6 @@
 [package]
 name = "downloadru"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.8"
 description = "Screenshot tool for download.ru"
 authors = ["you"]
 edition = "2021"
