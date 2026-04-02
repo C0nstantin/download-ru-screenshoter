@@ -101,6 +101,18 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
         })();
     "#;
 
+    // Clear any existing oauth window first
+    if let Some(existing) = app.get_webview_window("oauth") {
+        let _ = existing.destroy();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    // Clear webview cookies so user gets a fresh login form
+    // (prevents auto-login with stale session after logout).
+    // We use a temporary webview pointed at about:blank, clear its data store,
+    // then destroy it before creating the real OAuth webview.
+    clear_webview_cookies(&app);
+
     let win = tauri::WebviewWindowBuilder::new(
         &app,
         "oauth",
@@ -211,6 +223,28 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
     });
 
     Ok(())
+}
+
+/// Clear webview cookies/session data so OAuth always shows a fresh login form.
+/// Uses Tauri's clear_all_browsing_data (available in wry/Tauri 2.10+).
+fn clear_webview_cookies(app: &AppHandle) {
+    // Create a tiny hidden webview, clear its data store, then destroy it.
+    // All webviews in the same app share the cookie jar, so clearing one clears all.
+    let temp = tauri::WebviewWindowBuilder::new(
+        app,
+        "cookie-cleaner",
+        tauri::WebviewUrl::App("about:blank".into()),
+    )
+    .visible(false)
+    .inner_size(1.0, 1.0)
+    .build();
+
+    if let Ok(w) = temp {
+        let _ = w.clear_all_browsing_data();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let _ = w.destroy();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 fn urlencoding_decode(s: &str) -> String {
