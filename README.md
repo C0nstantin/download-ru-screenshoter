@@ -36,6 +36,7 @@ https://github.com/user-attachments/assets/fb020613-4d54-4845-8bff-015a1a98d0ec
 - Выбор цвета и толщины линий
 - Отмена/повтор действий (Undo/Redo)
 - Перетаскивание и изменение размера аннотаций
+- Водяной знак **download.ru** на экспортированных скриншотах
 
 ### Запись видео (macOS)
 
@@ -47,10 +48,8 @@ https://github.com/user-attachments/assets/fb020613-4d54-4845-8bff-015a1a98d0ec
 
 Во время записи:
 
-- Индикатор записи с пульсирующей красной точкой в углу экрана
-- **Кнопка мьюта микрофона** — можно отключить/включить микрофон прямо во время записи
-- Кнопка "Стоп" для остановки записи
-- Аудио с микрофона записывается по умолчанию
+- **Остановка записи через меню трея** — как в нативном записывальщике macOS
+- Кнопка мьюта микрофона в UI записи
 
 После записи открывается окно результата:
 
@@ -68,7 +67,7 @@ https://github.com/user-attachments/assets/fb020613-4d54-4845-8bff-015a1a98d0ec
 
 ### Загрузка на download.ru
 
-- Авторизация через OAuth 2.0 (download.ru)
+- Авторизация через OAuth 2.0 + PKCE (кроссплатформенная)
 - Автоматическая загрузка скриншотов после сохранения в редакторе
 - Загрузка видео из окна результата
 - Ссылка автоматически копируется в буфер обмена
@@ -86,9 +85,14 @@ https://github.com/user-attachments/assets/fb020613-4d54-4845-8bff-015a1a98d0ec
 
 Горячие клавиши можно переназначить в настройках.
 
+### Локализация
+
+- Русский и English
+- Переключение языка в настройках
+
 ### Поведение приложения
 
-- Живёт в системном трее (иконка в панели меню)
+- Живёт в системном трее (монохромная template-иконка на macOS)
 - Двойной клик на иконку в трее — открывает настройки
 - Без открытых окон скрывается из Dock и Cmd+Tab (macOS)
 - При открытии любого окна появляется в Dock и Cmd+Tab
@@ -108,7 +112,6 @@ https://github.com/user-attachments/assets/fb020613-4d54-4845-8bff-015a1a98d0ec
    ```
    Или: правый клик → "Открыть" → подтвердить в диалоге
 4. Выдай разрешение на запись экрана: **Системные настройки → Конфиденциальность → Запись экрана**
-5. Для записи аудио: выдай разрешение на микрофон
 
 ### Windows
 
@@ -119,8 +122,21 @@ https://github.com/user-attachments/assets/fb020613-4d54-4845-8bff-015a1a98d0ec
 ### Linux
 
 1. Скачай `.AppImage` или `.deb` из [Releases](../../releases)
-2. AppImage: `chmod +x DownloadRu-Screenshoter.AppImage && ./DownloadRu-Screenshoter.AppImage`
-3. deb: `sudo dpkg -i downloadru-screenshoter.deb`
+2. **AppImage:**
+   ```bash
+   chmod +x DownloadRu.Screenshoter_*_amd64.AppImage
+   ./DownloadRu.Screenshoter_*_amd64.AppImage
+   ```
+3. **deb (Debian/Ubuntu):**
+   ```bash
+   sudo dpkg -i DownloadRu.Screenshoter_*_amd64.deb
+   ```
+
+**Если ошибка `libEGL: failed to open /dev/dri/renderD128: Permission denied`:**
+```bash
+sudo usermod -aG render $USER
+# перелогиниться
+```
 
 **Системные зависимости** (Ubuntu/Debian):
 
@@ -166,7 +182,7 @@ sudo dnf install -y \
 
 ### Требования
 
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 20+
 - [Rust](https://rustup.rs/) 1.70+
 - [Tauri CLI](https://tauri.app/start/prerequisites/)
 
@@ -179,6 +195,14 @@ sudo dnf install -y \
 ```bash
 npm install
 npm run tauri dev
+```
+
+### Dev mode (beta-сервер)
+
+Для сборки с переключателем beta/production сервера в настройках:
+
+```bash
+npm run tauri dev -- --features dev_mode
 ```
 
 ### Сборка
@@ -196,19 +220,20 @@ src/                          # React фронтенд
 ├── pages/
 │   ├── OverlayPage.tsx       # Overlay для выбора области (скриншот/видео)
 │   ├── EditorPage.tsx        # Редактор скриншотов с аннотациями
-│   ├── RecordingPage.tsx     # Индикатор записи (Стоп + Мьют)
 │   ├── VideoResultPage.tsx   # Результат видеозаписи (превью, обрезка, конвертация)
-│   └── SettingsPage.tsx      # Настройки (авторизация, горячие клавиши)
+│   └── MainPage.tsx          # Настройки (авторизация, горячие клавиши, язык)
 ├── App.tsx                   # Роутинг
 └── store/                    # Zustand store для редактора
 
 src-tauri/src/                # Rust бэкенд
 ├── lib.rs                    # Точка входа, трей, обработчики меню, localfile:// протокол
+├── config.rs                 # Конфигурация API URL (prod/beta), dev_mode
+├── i18n.rs                   # Локализация (Русский/English)
 ├── state.rs                  # Глобальное состояние приложения (AppState)
 └── commands/
     ├── screenshot.rs         # Захват экрана, overlay, мульти-монитор
     ├── recording.rs          # Запись видео, конвертация, мьют микрофона
-    ├── upload.rs             # OAuth авторизация, загрузка на download.ru
+    ├── upload.rs             # OAuth PKCE авторизация, загрузка на download.ru
     ├── hotkeys.rs            # Глобальные горячие клавиши
     └── settings.rs           # Системные настройки
 ```
@@ -219,7 +244,6 @@ src-tauri/src/                # Rust бэкенд
 
 - [ ] **Запись видео (Linux/Windows)** — реализовать через ffmpeg
 - [ ] **Мульти-монитор (Linux/Windows)** — отдельный overlay на каждый монитор
-- [ ] **Иконка** — монохромная иконка для трея macOS (см. [ICONS.md](ICONS.md))
 
 ---
 
