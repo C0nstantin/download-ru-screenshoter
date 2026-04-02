@@ -9,7 +9,7 @@ use crate::state::AppState;
 // OAuth client_id loaded from environment at build time, with XOR obfuscation at rest.
 // To set: export OAUTH_CLIENT_ID=... before `cargo build`.
 // Falls back to built-in (obfuscated) default for development.
-// Note: client_secret is no longer needed — this is a public PKCE client.
+// Note: client_secret is no longer needed — this is a public PKCE client (Confidential: false).
 fn oauth_client_id() -> String {
     if let Ok(val) = std::env::var("OAUTH_CLIENT_ID") {
         return val;
@@ -29,10 +29,13 @@ fn deobfuscate(data: &[u8]) -> String {
     data.iter().map(|b| (b ^ OBFUSCATION_KEY) as char).collect()
 }
 
-const REDIRECT_URI: &str = "download-screenshoter://auth/callback";
+// Use OOB redirect for cross-platform compatibility (works on Linux/Windows/macOS).
+// Custom URI scheme (download-screenshoter://) doesn't reliably trigger on_navigation
+// in WebView2 (Windows) and WebKitGTK (Linux).
+const REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
 const STORE_FILE: &str = "auth.json";
 
-/// Generate a PKCE code_verifier (43 base64url chars from 32 random bytes).
+/// Generate a PKCE code_verifier (base64url from 32 random bytes).
 fn generate_code_verifier() -> String {
     let bytes: Vec<u8> = [
         uuid::Uuid::new_v4().as_bytes().as_slice(),
@@ -58,9 +61,9 @@ struct TokenResponse {
     expires_in: Option<u64>,
 }
 
-/// Open internal webview for OAuth with PKCE — intercepts redirect to custom URI scheme.
-/// Flow: webview → login → Doorkeeper redirects to download-screenshoter://auth/callback?code=...
-/// → on_navigation catches it → exchange code with code_verifier → token saved.
+/// Open internal webview for OAuth with PKCE + OOB redirect.
+/// Flow: webview → login → Doorkeeper shows code on page →
+/// init_script + polling captures code → exchange with code_verifier → token saved.
 #[tauri::command]
 pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let code_verifier = generate_code_verifier();
@@ -80,6 +83,24 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
     let code_captured = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let code_captured_close = std::sync::Arc::clone(&code_captured);
 
+    // JS: capture code from URL params on page load (OOB redirect puts code in URL or page body)
+    let init_script = r#"
+        (function() {
+            function checkCode() {
+                var params = new URLSearchParams(window.location.search);
+                var code = params.get('code');
+                if (code) {
+                    window.location = 'oauth-capture://code?code=' + encodeURIComponent(code);
+                }
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function() { setTimeout(checkCode, 100); });
+            } else {
+                setTimeout(checkCode, 100);
+            }
+        })();
+    "#;
+
     let win = tauri::WebviewWindowBuilder::new(
         &app,
         "oauth",
@@ -88,13 +109,14 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
     .title(crate::i18n::current(&app).oauth_title)
     .inner_size(900.0, 650.0)
     .visible(true)
+    .initialization_script(init_script)
     .on_navigation(move |nav_url| {
         let url_str = nav_url.as_str();
         #[cfg(debug_assertions)]
         println!("OAuth nav: {}", url_str);
 
-        // Catch the redirect to our custom URI scheme (download-screenshoter://auth/callback?code=...)
-        if url_str.starts_with(REDIRECT_URI) || url_str.starts_with("download-screenshoter://") {
+        // Catch our internal capture scheme (triggered by init_script or polling eval)
+        if url_str.starts_with("oauth-capture://") {
             if code_captured.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 return false;
             }
@@ -128,12 +150,57 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
             return false;
         }
 
+        // When user reaches the authorize page — start polling for code after Allow click.
+        // OOB displays it in <code>, <pre>, or readonly input elements.
+        if url_str.contains("/oauth/authorize") {
+            let app2 = app_clone.clone();
+            let captured2 = code_captured.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
+                let check_js = r#"
+                    (function() {
+                        var code = null;
+                        var p = new URLSearchParams(window.location.search);
+                        code = p.get('code');
+                        if (!code) {
+                            var els = document.querySelectorAll('code, pre, .oauth-code, [class*="auth-code"], [class*="access-code"]');
+                            for (var i = 0; i < els.length; i++) {
+                                var t = (els[i].textContent || '').trim();
+                                if (/^[0-9a-f]{64}$/i.test(t)) { code = t; break; }
+                            }
+                        }
+                        if (!code) {
+                            var inputs = document.querySelectorAll('input[readonly], input[type="text"][disabled]');
+                            for (var i = 0; i < inputs.length; i++) {
+                                var v = inputs[i].value || '';
+                                if (/^[0-9a-f]{64}$/i.test(v)) { code = v; break; }
+                            }
+                        }
+                        if (code) {
+                            window.location = 'oauth-capture://code?code=' + encodeURIComponent(code);
+                        }
+                    })();
+                "#;
+
+                for _ in 0..90 {
+                    if captured2.load(std::sync::atomic::Ordering::SeqCst) { break; }
+                    if let Some(w) = app2.get_webview_window("oauth") {
+                        let _ = w.eval(check_js);
+                    } else {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            });
+        }
+
         true
     })
     .build()
     .map_err(|e| format!("Failed to open auth window: {}", e))?;
 
-    // Only emit false if user closed manually WITHOUT completing auth
+    // Emit false if user closed manually without completing auth
     let app_for_close = app.clone();
     win.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { .. } = event {
@@ -285,9 +352,8 @@ pub fn logout(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // Open sign_out in a temporary webview window
     let app_clone = app.clone();
-    let win = tauri::WebviewWindowBuilder::new(
+    let _win = tauri::WebviewWindowBuilder::new(
         &app,
         "signout",
         tauri::WebviewUrl::External(
@@ -300,7 +366,6 @@ pub fn logout(
     .build()
     .map_err(|e| format!("Failed to open signout window: {}", e))?;
 
-    // Close the window after a short delay (enough for sign_out to complete)
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         if let Some(w) = app_clone.get_webview_window("signout") {
@@ -308,7 +373,6 @@ pub fn logout(
         }
     });
 
-    // Clear local tokens
     let store = app.store(STORE_FILE)
         .map_err(|e| format!("Failed to open store: {}", e))?;
     store.delete("access_token");
@@ -370,7 +434,6 @@ pub async fn get_or_create_screenshots_folder_pub(client: &reqwest::Client, toke
 
 /// Get or create Screenshots folder, return its id
 async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str) -> Result<String, String> {
-    // List root folder contents
     let resp = client
         .get(format!("{}/folders.json", crate::config::api_base_url()))
         .header("Authorization", format!("Bearer {}", token))
@@ -386,14 +449,12 @@ async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str)
     let folder_list: FolderListResponse = resp.json().await
         .map_err(|e| format!("Failed to parse folders: {}", e))?;
 
-    // Look for Screenshots folder in contents
     if let Some(f) = folder_list.contents.iter().find(|f| f.is_dir && f.name == "Screenshots") {
         #[cfg(debug_assertions)]
         println!("Found Screenshots folder: {}", f.id);
         return Ok(f.id.clone());
     }
 
-    // Create Screenshots folder
     #[cfg(debug_assertions)]
     println!("Creating Screenshots folder...");
     let resp = client
@@ -426,7 +487,6 @@ pub async fn upload_to_download(
     image_data: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<UploadResponse, String> {
-    // Get image bytes
     let png_bytes = if let Some(data) = image_data {
         let base64_data = if data.contains(",") {
             data.split(",").last().unwrap_or(&data)
@@ -440,7 +500,6 @@ pub async fn upload_to_download(
         current.clone().ok_or("No screenshot to upload")?
     };
 
-    // Get access token
     let token = {
         let token = state.access_token.lock().unwrap();
         token.clone().ok_or("No access token. Please login in settings.")?
@@ -450,11 +509,8 @@ pub async fn upload_to_download(
     println!("Uploading: {} ({} bytes)", filename, png_bytes.len());
 
     let client = reqwest::Client::new();
-
-    // Get or create Screenshots folder
     let parent_id = get_or_create_screenshots_folder(&client, &token).await?;
 
-    // Create multipart form - field name "files[]" as browser does
     let file_part = multipart::Part::bytes(png_bytes)
         .file_name(filename.clone())
         .mime_str("image/png")
@@ -463,7 +519,6 @@ pub async fn upload_to_download(
     let form = multipart::Form::new()
         .part("files[]", file_part);
 
-    // POST /fast_upload?parent_id=<id>
     let url = format!("{}/fast_upload?parent_id={}", crate::config::api_base_url(), parent_id);
     #[cfg(debug_assertions)]
     println!("POST {}", url);
@@ -491,7 +546,6 @@ pub async fn upload_to_download(
     let api_response: ApiResponse = serde_json::from_str(&body)
         .map_err(|e| format!("Failed to parse response: {} | body: {}", e, &body[..body.len().min(300)]))?;
 
-    // secure_url may be relative like /g/xxx... - prepend domain
     let secure_url = if api_response.object.secure_url.starts_with('/') {
         format!("{}{}", crate::config::api_base_url(), api_response.object.secure_url)
     } else {
