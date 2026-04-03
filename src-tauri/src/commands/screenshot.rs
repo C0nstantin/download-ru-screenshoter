@@ -731,8 +731,9 @@ fn create_editor_window(app: &AppHandle, width: u32, height: u32) -> Result<(), 
         .unwrap_or_default()
         .as_millis());
 
+    let tr = crate::i18n::current(app);
     let result = WebviewWindowBuilder::new(app, "editor", WebviewUrl::App(url.into()))
-        .title("Редактор скриншота")
+        .title(tr.editor_title)
         .inner_size(win_width, win_height)
         .resizable(true)
         .center()

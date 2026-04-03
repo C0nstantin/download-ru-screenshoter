@@ -25,6 +25,10 @@ pub struct Translations {
     // Upload
     pub oauth_title: &'static str,
     pub signout_title: &'static str,
+
+    // Window titles
+    pub editor_title: &'static str,
+    pub settings_title: &'static str,
 }
 
 pub static RU: Translations = Translations {
@@ -47,6 +51,9 @@ pub static RU: Translations = Translations {
 
     oauth_title: "Авторизация download.ru",
     signout_title: "Выход...",
+
+    editor_title: "Редактор скриншота",
+    settings_title: "DownloadRu Screenshoter - Настройки",
 };
 
 pub static EN: Translations = Translations {
@@ -69,6 +76,9 @@ pub static EN: Translations = Translations {
 
     oauth_title: "download.ru Authorization",
     signout_title: "Logging out...",
+
+    editor_title: "Screenshot Editor",
+    settings_title: "DownloadRu Screenshoter - Settings",
 };
 
 pub fn current(app: &AppHandle) -> &'static Translations {

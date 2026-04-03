@@ -107,21 +107,30 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
-    // Clear webview cookies so user gets a fresh login form
-    // (prevents auto-login with stale session after logout).
-    // We use a temporary webview pointed at about:blank, clear its data store,
-    // then destroy it before creating the real OAuth webview.
-    clear_webview_cookies(&app);
+    // Use a unique data directory for each OAuth session so cookies don't persist.
+    // This avoids stale session bug (auto-login after logout) on all platforms.
+    // On Windows (WebView2), clear_all_browsing_data() is unreliable, so
+    // a fresh temp dir per session is the most robust approach.
+    let oauth_data_dir = std::env::temp_dir().join(format!("downloadru-oauth-{}", uuid::Uuid::new_v4()));
 
-    let win = tauri::WebviewWindowBuilder::new(
+    let mut builder = tauri::WebviewWindowBuilder::new(
         &app,
         "oauth",
         tauri::WebviewUrl::External(url.parse().map_err(|e| format!("URL error: {}", e))?),
     )
     .title(crate::i18n::current(&app).oauth_title)
     .inner_size(900.0, 650.0)
+    .resizable(true)
     .visible(true)
-    .initialization_script(init_script)
+    .initialization_script(init_script);
+
+    // Set isolated data directory (WebView2 on Windows, WebKitGTK on Linux)
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.data_directory(oauth_data_dir.clone());
+    }
+
+    let win = builder
     .on_navigation(move |nav_url| {
         let url_str = nav_url.as_str();
         #[cfg(debug_assertions)]
@@ -212,39 +221,33 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
     .build()
     .map_err(|e| format!("Failed to open auth window: {}", e))?;
 
-    // Emit false if user closed manually without completing auth
+    // Emit false if user closed manually without completing auth, clean up temp data dir
     let app_for_close = app.clone();
     win.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { .. } = event {
+        if let tauri::WindowEvent::Destroyed = event {
             if !code_captured_close.load(std::sync::atomic::Ordering::SeqCst) {
                 let _ = app_for_close.emit("oauth-complete", false);
+            }
+            // Clean up temp OAuth data directory
+            #[cfg(not(target_os = "macos"))]
+            {
+                let dir = std::env::temp_dir().join("downloadru-oauth-");
+                // Clean all old oauth dirs
+                if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+                    for entry in entries.flatten() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            if name.starts_with("downloadru-oauth-") {
+                                let _ = std::fs::remove_dir_all(entry.path());
+                            }
+                        }
+                    }
+                }
+                let _ = dir;
             }
         }
     });
 
     Ok(())
-}
-
-/// Clear webview cookies/session data so OAuth always shows a fresh login form.
-/// Uses Tauri's clear_all_browsing_data (available in wry/Tauri 2.10+).
-fn clear_webview_cookies(app: &AppHandle) {
-    // Create a tiny hidden webview, clear its data store, then destroy it.
-    // All webviews in the same app share the cookie jar, so clearing one clears all.
-    let temp = tauri::WebviewWindowBuilder::new(
-        app,
-        "cookie-cleaner",
-        tauri::WebviewUrl::App("about:blank".into()),
-    )
-    .visible(false)
-    .inner_size(1.0, 1.0)
-    .build();
-
-    if let Ok(w) = temp {
-        let _ = w.clear_all_browsing_data();
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        let _ = w.destroy();
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
 }
 
 fn urlencoding_decode(s: &str) -> String {
