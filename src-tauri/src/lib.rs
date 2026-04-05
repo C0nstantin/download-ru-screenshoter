@@ -9,8 +9,33 @@ use tauri::{AppHandle, Manager};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
+use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use state::AppState;
+
+fn init_logging(app: &tauri::App) {
+    let log_dir = app.path().app_log_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let _ = std::fs::create_dir_all(&log_dir);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "screenshoter.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    // Leak guard so logging works for entire app lifetime
+    std::mem::forget(guard);
+
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .init();
+
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        log_dir = %log_dir.display(),
+        "app starting"
+    );
+}
 
 /// Activate app in Dock and Cmd+Tab (Accessory→Regular requires NSApp.activate).
 #[cfg(target_os = "macos")]
@@ -46,7 +71,7 @@ pub fn run() {
                 )
                 && !file_path.contains("..");
             if !is_allowed {
-                eprintln!("localfile:// blocked path: {}", file_path);
+                tracing::warn!(path = %file_path, "localfile:// blocked path");
                 return tauri::http::Response::builder()
                     .status(403).body(vec![]).unwrap();
             }
@@ -107,6 +132,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
         .setup(|app| {
+            init_logging(app);
             let handle = app.handle().clone();
 
             // Create tray menu - without "show window" option
@@ -186,7 +212,7 @@ pub fn run() {
 
             // Register global shortcuts from saved config
             if let Err(e) = commands::hotkeys::register_hotkeys(&app.handle()) {
-                eprintln!("Failed to register hotkeys: {}", e);
+                tracing::error!(error = %e, "Failed to register hotkeys");
             }
 
             Ok(())
@@ -243,6 +269,7 @@ pub fn run() {
             commands::hotkeys::set_hotkeys,
             commands::hotkeys::unregister_hotkeys,
             commands::settings::open_system_settings,
+            commands::settings::run_diagnostics,
             commands::recording::start_video_capture,
             commands::recording::start_video_recording,
             commands::recording::start_video_capture_window,

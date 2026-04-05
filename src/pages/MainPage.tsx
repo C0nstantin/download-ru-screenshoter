@@ -234,6 +234,26 @@ function MainPage() {
           </label>
         </section>
       )}
+
+      <section className="section" style={{ borderTop: "1px solid #eee", marginTop: 12, paddingTop: 12 }}>
+        <button
+          className="secondary"
+          style={{ fontSize: 12, opacity: 0.7 }}
+          onClick={async () => {
+            try {
+              const report = await invoke<Record<string, unknown>>("run_diagnostics");
+              const text = JSON.stringify(report, null, 2);
+              await navigator.clipboard.writeText(text);
+              setStatus("Diagnostic copied to clipboard");
+              setTimeout(() => setStatus(""), 3000);
+            } catch (err) {
+              setStatus(String(err));
+            }
+          }}
+        >
+          📋 Copy Diagnostics
+        </button>
+      </section>
     </main>
   );
 }

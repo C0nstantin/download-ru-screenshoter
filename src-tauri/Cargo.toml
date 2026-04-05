@@ -1,6 +1,6 @@
 [package]
 name = "downloadru"
-version = "1.0.0-beta.12"
+version = "1.0.0-beta.13"
 description = "Screenshot tool for download.ru"
 authors = ["you"]
 edition = "2021"
@@ -47,6 +47,11 @@ dirs = "6"
 thiserror = "2"
 display-info = "0.4"
 tauri-plugin-single-instance = "2.4.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

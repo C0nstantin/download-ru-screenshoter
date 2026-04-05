@@ -51,7 +51,7 @@ pub fn get_displays() -> Result<Vec<DisplayInfo>, String> {
     }).collect();
 
     #[cfg(debug_assertions)]
-    println!("Found {} displays: {:?}", displays.len(), displays.iter().map(|d| format!("{}x{} at ({},{})", d.width, d.height, d.x, d.y)).collect::<Vec<_>>());
+    tracing::debug!(count = displays.len(), details = ?displays.iter().map(|d| format!("{}x{} at ({},{})", d.width, d.height, d.x, d.y)).collect::<Vec<_>>(), "found displays");
 
     Ok(displays)
 }
@@ -197,15 +197,15 @@ pub fn save_screenshot(
 /// Open editor window from frontend
 #[tauri::command]
 pub fn open_editor(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    println!("open_editor called");
+    tracing::info!("open_editor called");
 
     let dims = {
         let dims = state.screenshot_dimensions.lock().unwrap();
-        println!("Dimensions from state: {:?}", dims);
+        tracing::debug!(?dims, "dimensions from state");
         dims.clone().ok_or("No screenshot dimensions")?
     };
 
-    println!("Creating editor with dimensions: {}x{}", dims.0, dims.1);
+    tracing::info!(width = dims.0, height = dims.1, "creating editor with dimensions");
 
     // Small delay to ensure state is fully updated
     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -229,7 +229,7 @@ pub fn start_region_capture(app: AppHandle) -> Result<(), String> {
 /// macOS: Use native screencapture -i (interactive) which handles multi-monitor
 #[cfg(target_os = "macos")]
 fn start_region_capture_macos(app: AppHandle) -> Result<(), String> {
-    println!("Starting native region capture (screencapture -i)...");
+    tracing::info!("starting native region capture (screencapture -i)");
 
     let temp_path = format!("/tmp/screenshot_region_{}.png", uuid::Uuid::new_v4());
     let temp_path_clone = temp_path.clone();
@@ -246,7 +246,7 @@ fn start_region_capture_macos(app: AppHandle) -> Result<(), String> {
                     let _ = std::fs::remove_file(&temp_path_clone);
 
                     if png_bytes.is_empty() {
-                        println!("Region capture: cancelled by user");
+                        tracing::info!("region capture: cancelled by user");
                         return;
                     }
 
@@ -268,7 +268,7 @@ fn start_region_capture_macos(app: AppHandle) -> Result<(), String> {
                 }
             }
             _ => {
-                println!("Region capture: cancelled or failed");
+                tracing::info!("region capture: cancelled or failed");
             }
         }
     });
@@ -482,7 +482,7 @@ pub fn capture_fullscreen_and_edit_internal(app: AppHandle, display_id: Option<u
             .find(|s| s.display_info.id == id)
             .ok_or_else(|| format!("Display {} not found", id))?;
 
-        println!("Capturing display {}: {}x{}", id, screen.display_info.width, screen.display_info.height);
+        tracing::info!(display_id = id, width = screen.display_info.width, height = screen.display_info.height, "capturing display");
 
         let image = screen.capture().map_err(|e| format!("Failed to capture screen: {}", e))?;
         let (w, h) = (image.width(), image.height());
@@ -500,8 +500,7 @@ pub fn capture_fullscreen_and_edit_internal(app: AppHandle, display_id: Option<u
         for screen in &screens {
             let info = &screen.display_info;
             if let Ok(img) = screen.capture() {
-                println!("Screen {}: captured {}x{} (logical {}x{} at ({},{}) scale={})",
-                    info.id, img.width(), img.height(), info.width, info.height, info.x, info.y, info.scale_factor);
+                tracing::info!(screen_id = info.id, captured_width = img.width(), captured_height = img.height(), logical_width = info.width, logical_height = info.height, x = info.x, y = info.y, scale = info.scale_factor, "screen captured");
                 captures.push((img, info.x, info.y, info.scale_factor));
             }
         }
@@ -528,7 +527,7 @@ pub fn capture_fullscreen_and_edit_internal(app: AppHandle, display_id: Option<u
         let total_width = (max_x - min_x) as u32;
         let total_height = (max_y - min_y) as u32;
 
-        println!("Capturing all {} displays: total {}x{} pixels", captures.len(), total_width, total_height);
+        tracing::info!(display_count = captures.len(), total_width, total_height, "capturing all displays");
 
         let mut combined = screenshots::image::RgbaImage::new(total_width, total_height);
 
@@ -551,7 +550,7 @@ pub fn capture_fullscreen_and_edit_internal(app: AppHandle, display_id: Option<u
         (bytes, w, h)
     };
 
-    println!("Fullscreen capture: {}x{} ({} bytes)", width, height, png_bytes.len());
+    tracing::info!(width, height, bytes = png_bytes.len(), "fullscreen capture complete");
 
     let state = app.state::<AppState>();
     {
@@ -580,7 +579,7 @@ pub fn capture_window_and_edit(app: AppHandle) -> Result<(), String> {
     {
         // On Linux/Windows, fall back to region capture for now
         // TODO: Implement proper window selection using platform APIs
-        println!("Window capture not implemented on this platform, using region capture");
+        tracing::info!("window capture not implemented on this platform, using region capture");
         start_region_capture(app)
     }
 }
@@ -588,7 +587,7 @@ pub fn capture_window_and_edit(app: AppHandle) -> Result<(), String> {
 /// macOS: Use native screencapture -w for window selection
 #[cfg(target_os = "macos")]
 fn capture_window_macos(app: AppHandle) -> Result<(), String> {
-    println!("capture_window_macos called");
+    tracing::info!("capture_window_macos called");
 
     let temp_path = format!("/tmp/screenshot_window_{}.png", uuid::Uuid::new_v4());
     let temp_path_clone = temp_path.clone();
@@ -605,7 +604,7 @@ fn capture_window_macos(app: AppHandle) -> Result<(), String> {
                     let _ = std::fs::remove_file(&temp_path_clone);
 
                     if png_bytes.is_empty() {
-                        println!("Window capture: cancelled by user");
+                        tracing::info!("window capture: cancelled by user");
                         return;
                     }
 
@@ -627,10 +626,10 @@ fn capture_window_macos(app: AppHandle) -> Result<(), String> {
                 }
             }
             Ok(result) => {
-                println!("screencapture exited with: {:?}", result.status);
+                tracing::info!(status = ?result.status, "screencapture exited");
             }
             Err(e) => {
-                println!("screencapture error: {}", e);
+                tracing::error!(%e, "screencapture error");
             }
         }
     });
@@ -648,7 +647,7 @@ fn create_overlay_window(app: &AppHandle, _offset_x: i32, _offset_y: i32, _total
     // Calculate logical bounding box of all screens
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
 
-    println!("=== Creating overlay for {} screens ===", screens.len());
+    tracing::info!(screen_count = screens.len(), "creating overlay for screens");
 
     let mut min_x = i32::MAX;
     let mut min_y = i32::MAX;
@@ -657,8 +656,7 @@ fn create_overlay_window(app: &AppHandle, _offset_x: i32, _offset_y: i32, _total
 
     for screen in &screens {
         let info = &screen.display_info;
-        println!("  Screen {}: {}x{} at ({}, {}), scale={}, primary={}",
-            info.id, info.width, info.height, info.x, info.y, info.scale_factor, info.is_primary);
+        tracing::info!(screen_id = info.id, width = info.width, height = info.height, x = info.x, y = info.y, scale = info.scale_factor, primary = info.is_primary, "screen info");
 
         min_x = min_x.min(info.x);
         min_y = min_y.min(info.y);
@@ -671,8 +669,8 @@ fn create_overlay_window(app: &AppHandle, _offset_x: i32, _offset_y: i32, _total
     let logical_x = min_x as f64;
     let logical_y = min_y as f64;
 
-    println!("  Bounding box: min=({}, {}), max=({}, {})", min_x, min_y, max_x, max_y);
-    println!("  Overlay window: {}x{} at ({}, {})", logical_width, logical_height, logical_x, logical_y);
+    tracing::info!(min_x, min_y, max_x, max_y, "bounding box");
+    tracing::info!(logical_width, logical_height, logical_x, logical_y, "overlay window");
 
     // On Windows, transparent windows don't receive input events properly
     // So we create a non-transparent window and use the screenshot as background
@@ -706,7 +704,7 @@ fn create_overlay_window(app: &AppHandle, _offset_x: i32, _offset_y: i32, _total
 }
 
 fn create_editor_window(app: &AppHandle, width: u32, height: u32) -> Result<(), String> {
-    println!("Creating editor window for image {}x{}", width, height);
+    tracing::info!(width, height, "creating editor window for image");
     // Show in Dock and Cmd+Tab when editor opens
     #[cfg(target_os = "macos")]
     crate::activate_as_regular(app);
@@ -717,13 +715,13 @@ fn create_editor_window(app: &AppHandle, width: u32, height: u32) -> Result<(), 
 
     // Always destroy existing window and create fresh one
     if let Some(existing) = app.get_webview_window("editor") {
-        println!("Destroying existing editor window");
+        tracing::info!("destroying existing editor window");
         let _ = existing.destroy();
         // Wait for window to be destroyed
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    println!("Editor window size: {}x{}", win_width, win_height);
+    tracing::info!(win_width, win_height, "editor window size");
 
     // Add timestamp to URL to prevent caching (placed after hash for WebView2 compatibility)
     let url = format!("index.html#/editor?t={}", std::time::SystemTime::now()
@@ -741,13 +739,13 @@ fn create_editor_window(app: &AppHandle, width: u32, height: u32) -> Result<(), 
 
     match result {
         Ok(window) => {
-            println!("Editor window created successfully");
+            tracing::info!("editor window created successfully");
             let _ = window.show();
             let _ = window.set_focus();
             Ok(())
         }
         Err(e) => {
-            eprintln!("Failed to create editor window: {}", e);
+            tracing::error!(%e, "failed to create editor window");
             Err(format!("Failed to create editor: {}", e))
         }
     }

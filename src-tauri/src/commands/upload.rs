@@ -133,8 +133,7 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
     let win = builder
     .on_navigation(move |nav_url| {
         let url_str = nav_url.as_str();
-        #[cfg(debug_assertions)]
-        println!("OAuth nav: {}", url_str);
+        tracing::debug!(url = %url_str, "OAuth nav");
 
         // Catch our internal capture scheme (triggered by init_script or polling eval)
         if url_str.starts_with("oauth-capture://") {
@@ -159,7 +158,7 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
                     match exchange_code_internal(code, verifier, &app2, token_arc2).await {
                         Ok(_) => { let _ = app2.emit("oauth-complete", true); }
                         Err(e) => {
-                            eprintln!("OAuth error: {}", e);
+                            tracing::error!(error = %e, "OAuth error");
                             let _ = app2.emit("oauth-complete", false);
                         }
                     }
@@ -312,8 +311,7 @@ async fn exchange_code_internal(
     let mut access_token = token_arc.lock().unwrap();
     *access_token = Some(token_resp.access_token);
 
-    #[cfg(debug_assertions)]
-    println!("OAuth: token saved successfully");
+    tracing::debug!("OAuth: token saved successfully");
     Ok(())
 }
 
@@ -487,13 +485,11 @@ async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str)
         .map_err(|e| format!("Failed to parse folders: {}", e))?;
 
     if let Some(f) = folder_list.contents.iter().find(|f| f.is_dir && f.name == "Screenshots") {
-        #[cfg(debug_assertions)]
-        println!("Found Screenshots folder: {}", f.id);
+        tracing::debug!(folder_id = %f.id, "Found Screenshots folder");
         return Ok(f.id.clone());
     }
 
-    #[cfg(debug_assertions)]
-    println!("Creating Screenshots folder...");
+    tracing::debug!("Creating Screenshots folder");
     let resp = client
         .post(format!("{}/folders.json", crate::config::api_base_url()))
         .header("Authorization", format!("Bearer {}", token))
@@ -512,8 +508,7 @@ async fn get_or_create_screenshots_folder(client: &reqwest::Client, token: &str)
     let created: CreateFolderResponse = resp.json().await
         .map_err(|e| format!("Failed to parse create folder response: {}", e))?;
 
-    #[cfg(debug_assertions)]
-    println!("Created Screenshots folder: {}", created.object.id);
+    tracing::debug!(folder_id = %created.object.id, "Created Screenshots folder");
     Ok(created.object.id)
 }
 
@@ -542,8 +537,7 @@ pub async fn upload_to_download(
         token.clone().ok_or("No access token. Please login in settings.")?
     };
 
-    #[cfg(debug_assertions)]
-    println!("Uploading: {} ({} bytes)", filename, png_bytes.len());
+    tracing::debug!(filename = %filename, size_bytes = png_bytes.len(), "Uploading");
 
     let client = reqwest::Client::new();
     let parent_id = get_or_create_screenshots_folder(&client, &token).await?;
@@ -557,8 +551,7 @@ pub async fn upload_to_download(
         .part("files[]", file_part);
 
     let url = format!("{}/fast_upload?parent_id={}", crate::config::api_base_url(), parent_id);
-    #[cfg(debug_assertions)]
-    println!("POST {}", url);
+    tracing::debug!(url = %url, "POST upload request");
 
     let response = client
         .post(&url)
@@ -573,8 +566,7 @@ pub async fn upload_to_download(
 
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
-    #[cfg(debug_assertions)]
-    println!("Upload response {}: {}", status, &body[..body.len().min(500)]);
+    tracing::debug!(status = %status, body = %&body[..body.len().min(500)], "Upload response");
 
     if !status.is_success() {
         return Err(format!("Upload failed with status {}: {}", status, body));
