@@ -579,11 +579,15 @@ pub fn capture_window_and_edit(app: AppHandle) -> Result<(), String> {
         capture_window_macos(app)
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        // On Linux/Windows, fall back to region capture for now
-        // TODO: Implement proper window selection using platform APIs
-        tracing::info!("window capture not implemented on this platform, using region capture");
+        capture_window_overlay(app)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, fall back to region capture for now
+        tracing::info!("window capture not implemented on Linux, using region capture");
         start_region_capture(app)
     }
 }
@@ -752,5 +756,269 @@ fn create_editor_window(app: &AppHandle, width: u32, height: u32) -> Result<(), 
             tracing::error!(%e, "failed to create editor window");
             Err(format!("Failed to create editor: {}", e))
         }
+    }
+}
+
+// ── Windows window capture ──────────────────────────────────────────
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct WindowInfo {
+    pub hwnd: u64,
+    pub title: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Open overlay in window-selection mode (Windows only)
+#[cfg(target_os = "windows")]
+fn capture_window_overlay(app: AppHandle) -> Result<(), String> {
+    tracing::info!("starting window capture overlay (Windows)");
+
+    // First capture the screen so overlay has a background
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+    if screens.is_empty() {
+        return Err("No screens found".to_string());
+    }
+
+    let screen = screens.first().unwrap();
+    let image = screen.capture().map_err(|e| format!("Failed to capture screen: {}", e))?;
+    let (width, height) = (image.width(), image.height());
+
+    let mut png_bytes = Vec::new();
+    let mut cursor = Cursor::new(&mut png_bytes);
+    image.write_to(&mut cursor, ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode PNG: {}", e))?;
+
+    let state = app.state::<AppState>();
+    {
+        let mut current = state.current_screenshot.lock().unwrap();
+        *current = Some(png_bytes);
+    }
+    {
+        let mut dims = state.screenshot_dimensions.lock().unwrap();
+        *dims = Some((width, height));
+    }
+
+    // Create overlay window
+    create_overlay_window(&app, 0, 0, width, height)?;
+
+    // Navigate to window-selection overlay
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let _ = overlay.eval("window.location.hash = '#/overlay-window';");
+        let _ = overlay.show();
+        let _ = overlay.set_focus();
+    }
+
+    Ok(())
+}
+
+/// List visible windows with their positions (for window selection overlay)
+#[tauri::command]
+pub async fn get_window_list() -> Result<Vec<WindowInfo>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        get_window_list_windows()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(vec![])
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_window_list_windows() -> Result<Vec<WindowInfo>, String> {
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    let mut windows_list: Vec<WindowInfo> = Vec::new();
+
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_windows_proc),
+            LPARAM(&mut windows_list as *mut Vec<WindowInfo> as isize),
+        );
+    }
+
+    tracing::info!(count = windows_list.len(), "enumerated windows");
+    Ok(windows_list)
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn enum_windows_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::BOOL {
+    use windows::Win32::Foundation::{BOOL, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    // Skip invisible windows
+    if !IsWindowVisible(hwnd).as_bool() {
+        return BOOL(1);
+    }
+
+    // Skip tool windows (tooltips, etc.)
+    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+    if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+        return BOOL(1);
+    }
+
+    // Only root windows
+    let root = GetAncestor(hwnd, GA_ROOT);
+    if root != hwnd {
+        return BOOL(1);
+    }
+
+    // Get window rect
+    let mut rect = RECT::default();
+    if GetWindowRect(hwnd, &mut rect).is_err() {
+        return BOOL(1);
+    }
+
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+
+    // Skip tiny windows (< 100px)
+    if width < 100 || height < 50 {
+        return BOOL(1);
+    }
+
+    // Get title
+    let mut title_buf = [0u16; 256];
+    let len = GetWindowTextW(hwnd, &mut title_buf);
+    if len == 0 {
+        return BOOL(1); // Skip untitled windows
+    }
+    let title = String::from_utf16_lossy(&title_buf[..len as usize]);
+
+    let list = &mut *(lparam.0 as *mut Vec<WindowInfo>);
+    list.push(WindowInfo {
+        hwnd: hwnd.0 as u64,
+        title,
+        x: rect.left,
+        y: rect.top,
+        width,
+        height,
+    });
+
+    BOOL(1) // Continue enumeration
+}
+
+/// Capture a specific window by HWND and open editor
+#[tauri::command]
+pub async fn capture_window_by_hwnd(hwnd: u64, app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        capture_window_by_hwnd_windows(hwnd, app)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (hwnd, app);
+        Err("Window capture not supported on this platform".to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn capture_window_by_hwnd_windows(hwnd_val: u64, app: AppHandle) -> Result<(), String> {
+    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    use windows::Win32::Graphics::Gdi::*;
+
+    let hwnd = HWND(hwnd_val as *mut _);
+
+    tracing::info!(hwnd = hwnd_val, "capturing window by HWND");
+
+    unsafe {
+        // Get window dimensions
+        let mut rect = RECT::default();
+        GetWindowRect(hwnd, &mut rect).map_err(|e| format!("GetWindowRect failed: {}", e))?;
+
+        let width = (rect.right - rect.left) as i32;
+        let height = (rect.bottom - rect.top) as i32;
+
+        if width <= 0 || height <= 0 {
+            return Err("Window has zero size".to_string());
+        }
+
+        tracing::info!(width, height, "window dimensions");
+
+        // Create compatible DC and bitmap
+        let hdc_screen = GetDC(HWND::default());
+        let hdc_mem = CreateCompatibleDC(hdc_screen);
+        let hbitmap = CreateCompatibleBitmap(hdc_screen, width, height);
+        let old_bitmap = SelectObject(hdc_mem, hbitmap);
+
+        // Bring window to front and capture from screen DC (works with DWM composition)
+        let _ = SetForegroundWindow(hwnd);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        // Re-read window position after bringing to front
+        let mut rect2 = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut rect2);
+
+        // Capture from screen DC at window position
+        let _ = BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, rect2.left, rect2.top, SRCCOPY);
+
+        // Read bitmap data
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height, // Top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        GetDIBits(
+            hdc_mem,
+            hbitmap,
+            0,
+            height as u32,
+            Some(pixels.as_mut_ptr() as *mut _),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+
+        // Cleanup GDI
+        SelectObject(hdc_mem, old_bitmap);
+        let _ = DeleteObject(hbitmap);
+        DeleteDC(hdc_mem);
+        ReleaseDC(HWND::default(), hdc_screen);
+
+        // Convert BGRA to RGBA
+        for chunk in pixels.chunks_exact_mut(4) {
+            chunk.swap(0, 2); // B <-> R
+        }
+
+        // Create image and encode to PNG
+        let img = screenshots::image::RgbaImage::from_raw(width as u32, height as u32, pixels)
+            .ok_or("Failed to create image from pixels")?;
+
+        let mut png_bytes = Vec::new();
+        let mut cursor_buf = Cursor::new(&mut png_bytes);
+        img.write_to(&mut cursor_buf, ImageFormat::Png)
+            .map_err(|e| format!("Failed to encode PNG: {}", e))?;
+
+        // Store in state
+        let state = app.state::<AppState>();
+        {
+            let mut current = state.current_screenshot.lock().unwrap();
+            *current = Some(png_bytes);
+        }
+        {
+            let mut dims = state.screenshot_dimensions.lock().unwrap();
+            *dims = Some((width as u32, height as u32));
+        }
+
+        // Open editor
+        create_editor_window(&app, width as u32, height as u32)?;
+
+        Ok(())
     }
 }

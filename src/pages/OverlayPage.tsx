@@ -16,12 +16,23 @@ interface SelectionRect {
   endY: number;
 }
 
-function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" }) {
+interface WindowInfo {
+  hwnd: number;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" | "window" }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [screenshot, setScreenshot] = useState<ScreenshotData | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const [selection, setSelection] = useState<SelectionRect | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [windowList, setWindowList] = useState<WindowInfo[]>([]);
+  const [hoveredWindow, setHoveredWindow] = useState<WindowInfo | null>(null);
   const { t } = useTranslation();
 
   // Load screenshot on mount
@@ -36,9 +47,19 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
         console.error("Failed to get screenshot:", err);
         closeOverlay();
       });
+
+    // In window mode, load window list
+    if (mode === "window") {
+      invoke<WindowInfo[]>("get_window_list")
+        .then((list) => {
+          console.log("Got window list:", list.length, "windows");
+          setWindowList(list);
+        })
+        .catch((err) => console.error("Failed to get window list:", err));
+    }
   }, []);
 
-  // Draw the screenshot and selection
+  // Draw the screenshot and selection/window highlight
   useEffect(() => {
     if (!screenshot || !canvasRef.current) return;
 
@@ -53,6 +74,9 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
       canvas.width = rect.width;
       canvas.height = rect.height;
 
+      const scaleX = canvas.width / screenshot.width;
+      const scaleY = canvas.height / screenshot.height;
+
       // Draw full image
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
@@ -60,8 +84,37 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
       ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // If selection exists, draw highlighted region
-      if (selection) {
+      if (mode === "window" && hoveredWindow) {
+        // Highlight hovered window
+        const wx = hoveredWindow.x * scaleX;
+        const wy = hoveredWindow.y * scaleY;
+        const ww = hoveredWindow.width * scaleX;
+        const wh = hoveredWindow.height * scaleY;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(wx, wy, ww, wh);
+        ctx.clip();
+        ctx.clearRect(wx, wy, ww, wh);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+
+        ctx.strokeStyle = "#00aaff";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(wx, wy, ww, wh);
+
+        // Draw window title
+        const title = hoveredWindow.title.length > 50
+          ? hoveredWindow.title.substring(0, 50) + "..."
+          : hoveredWindow.title;
+        ctx.fillStyle = "rgba(0, 170, 255, 0.9)";
+        const textWidth = ctx.measureText(title).width + 16;
+        ctx.fillRect(wx, wy - 28, textWidth, 24);
+        ctx.fillStyle = "#fff";
+        ctx.font = "13px -apple-system, sans-serif";
+        ctx.fillText(title, wx + 8, wy - 10);
+      } else if (selection) {
+        // Region/video selection highlight
         const x = Math.min(selection.startX, selection.endX);
         const y = Math.min(selection.startY, selection.endY);
         const w = Math.abs(selection.endX - selection.startX);
@@ -94,7 +147,7 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
       setImageLoaded(true);
     };
     img.src = `data:image/png;base64,${screenshot.base64}`;
-  }, [screenshot, selection]);
+  }, [screenshot, selection, hoveredWindow]);
 
   const closeOverlay = async () => {
     const win = getCurrentWindow();
@@ -114,6 +167,19 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (mode === "window") {
+      // In window mode, click captures the hovered window
+      if (e.button === 2) {
+        e.preventDefault();
+        closeOverlay();
+        return;
+      }
+      if (hoveredWindow) {
+        captureWindow(hoveredWindow);
+      }
+      return;
+    }
+
     // Right click to reset selection
     if (e.button === 2) {
       e.preventDefault();
@@ -140,6 +206,34 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (mode === "window") {
+      // Find which window the cursor is over
+      if (!screenshot || !canvasRef.current) return;
+      const { x, y } = getCanvasCoords(e);
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = screenshot.width / rect.width;
+      const scaleY = screenshot.height / rect.height;
+      const screenX = x * scaleX;
+      const screenY = y * scaleY;
+
+      // Find smallest window containing the point (most specific)
+      let best: WindowInfo | null = null;
+      let bestArea = Infinity;
+      for (const w of windowList) {
+        if (screenX >= w.x && screenX <= w.x + w.width &&
+            screenY >= w.y && screenY <= w.y + w.height) {
+          const area = w.width * w.height;
+          if (area < bestArea) {
+            best = w;
+            bestArea = area;
+          }
+        }
+      }
+      setHoveredWindow(best);
+      return;
+    }
+
     if (!isSelecting || !selection) return;
     const { x, y } = getCanvasCoords(e);
     setSelection({
@@ -166,6 +260,16 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
     // - Press Enter to confirm
     // - Right-click or R to reset
     // - ESC to cancel
+  };
+
+  const captureWindow = async (win: WindowInfo) => {
+    try {
+      closeOverlay();
+      await invoke("capture_window_by_hwnd", { hwnd: win.hwnd });
+    } catch (err) {
+      console.error("Failed to capture window:", err);
+      closeOverlay();
+    }
   };
 
   const confirmSelection = useCallback(async () => {
@@ -224,8 +328,11 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === "Escape") {
+      if (mode === "window") {
+        closeOverlay();
+        return;
+      }
       if (selection && !isSelecting) {
-        // If there's a finished selection, reset it first
         setSelection(null);
       } else {
         closeOverlay();
@@ -267,6 +374,11 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
   }, []);
 
   const getHint = () => {
+    if (mode === "window") {
+      return hoveredWindow
+        ? `${hoveredWindow.title} — click to capture`
+        : "Hover over a window and click to capture. ESC to cancel.";
+    }
     if (selection && !isSelecting) {
       return mode === "video"
         ? t("overlay.videoConfirmHint")

@@ -18,7 +18,7 @@ function App() {
   }, [locale]);
 
   useEffect(() => {
-    const allowedRoutes = ["/", "/overlay", "/overlay-video", "/editor", "/recording", "/video-result"];
+    const allowedRoutes = ["/", "/overlay", "/overlay-video", "/overlay-window", "/editor", "/recording", "/video-result"];
     const sanitize = (raw: string) => {
       // Strip query params from hash (e.g. "#/editor?t=123" → "/editor")
       const h = raw.replace("#", "").split("?")[0] || "/";
@@ -40,6 +40,8 @@ function App() {
       return <OverlayPage mode="screenshot" />;
     case "/overlay-video":
       return <OverlayPage mode="video" />;
+    case "/overlay-window":
+      return <OverlayPage mode="window" />;
     case "/editor":
       return <EditorPage />;
     case "/recording":

@@ -258,6 +258,8 @@ pub fn run() {
             commands::screenshot::get_displays,
             commands::screenshot::save_screenshot,
             commands::screenshot::open_editor,
+            commands::screenshot::get_window_list,
+            commands::screenshot::capture_window_by_hwnd,
             commands::upload::upload_to_download,
             commands::upload::set_access_token,
             commands::upload::get_access_token,
