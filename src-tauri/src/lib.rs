@@ -58,12 +58,33 @@ pub fn run() {
         // Custom protocol to serve local video files with byte-range support
         .register_uri_scheme_protocol("localfile", |_app, req| {
             let path = req.uri().path().to_string();
-            let file_path = percent_decode(&path);
+            let decoded = percent_decode(&path);
+            // On Windows, URI path starts with /C:/... — strip leading / before drive letter
+            let file_path = if cfg!(target_os = "windows") && decoded.len() > 2 && decoded.as_bytes()[0] == b'/' && decoded.as_bytes()[2] == b':' {
+                decoded[1..].to_string()
+            } else {
+                decoded
+            };
 
-            // Security: only allow video files from /tmp/recording_* (our own recordings)
+            // Security: only allow video files from temp dir/recording_* (our own recordings)
             let canonical = std::path::Path::new(&file_path);
             let filename = canonical.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let is_allowed = canonical.parent() == Some(std::path::Path::new("/tmp"))
+            let in_allowed_dir = if cfg!(target_os = "windows") {
+                canonical.parent().map_or(false, |parent| {
+                    let tmp = std::env::temp_dir();
+                    match (parent.canonicalize(), tmp.canonicalize()) {
+                        (Ok(a), Ok(b)) => a.starts_with(&b) || a == b,
+                        _ => {
+                            let pp = parent.to_str().unwrap_or("").to_lowercase();
+                            let tp = tmp.to_str().unwrap_or("").to_lowercase();
+                            pp.starts_with(&tp)
+                        }
+                    }
+                })
+            } else {
+                canonical.parent() == Some(std::path::Path::new("/tmp"))
+            };
+            let is_allowed = in_allowed_dir
                 && filename.starts_with("recording_")
                 && matches!(
                     canonical.extension().and_then(|e| e.to_str()),

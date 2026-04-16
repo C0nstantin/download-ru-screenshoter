@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -24,6 +24,8 @@ function fmtTime(s: number) {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
+const isWindows = typeof navigator !== "undefined" && /Win(dows|32|64)/i.test(navigator.userAgent);
+
 function VideoResultPage() {
   const [info, setInfo] = useState<VideoInfo | null>(null);
   const [videoSrc, setVideoSrc] = useState("");
@@ -43,8 +45,9 @@ function VideoResultPage() {
     invoke<string>("get_last_recording_path").then((path) => {
       invoke<VideoInfo>("get_video_info", { path }).then((info) => {
         setInfo(info);
-        // Use custom localfile:// protocol that supports byte-range (needed for seek)
-        setVideoSrc(`localfile://localhost${info.path}`);
+        // Use convertFileSrc to generate platform-correct URL for custom protocol
+        // (Windows uses http://localfile.localhost/..., macOS/Linux uses localfile://...)
+        setVideoSrc(convertFileSrc(info.path, "localfile"));
       }).catch((e) => setError(String(e)));
     }).catch((e) => setError(String(e)));
   }, []);
@@ -72,7 +75,7 @@ function VideoResultPage() {
       });
       const newInfo = await invoke<VideoInfo>("get_video_info", { path: newPath });
       setInfo(newInfo);
-      setVideoSrc(`localfile://localhost${newPath}`);
+      setVideoSrc(convertFileSrc(newPath, "localfile"));
       setUploadUrl(""); // allow re-upload after conversion
       setTrimStart(0);
       setTrimEnd(0);
@@ -183,8 +186,8 @@ function VideoResultPage() {
         </div>
       )}
 
-      {/* Trim controls */}
-      {duration > 0 && (
+      {/* Trim controls (not supported on Windows) */}
+      {duration > 0 && !isWindows && (
         <div style={{ background: "#12122a", borderRadius: 6, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>{t("video.trim")}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -247,23 +250,27 @@ function VideoResultPage() {
 
       {/* Actions */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        {/* Quality selector */}
-        <select
-          value={preset}
-          onChange={(e) => setPreset(e.target.value)}
-          style={{
-            background: "#12122a", color: "#eee", border: "1px solid #444",
-            borderRadius: 6, padding: "5px 8px", fontSize: 12, cursor: "pointer",
-          }}
-        >
-          <option value="high">{t("video.qualityHigh")}</option>
-          <option value="medium">{t("video.qualityMedium")}</option>
-          <option value="low">{t("video.qualityLow")}</option>
-        </select>
+        {/* Quality selector and convert — not supported on Windows (recording is already MP4) */}
+        {!isWindows && (
+          <>
+            <select
+              value={preset}
+              onChange={(e) => setPreset(e.target.value)}
+              style={{
+                background: "#12122a", color: "#eee", border: "1px solid #444",
+                borderRadius: 6, padding: "5px 8px", fontSize: 12, cursor: "pointer",
+              }}
+            >
+              <option value="high">{t("video.qualityHigh")}</option>
+              <option value="medium">{t("video.qualityMedium")}</option>
+              <option value="low">{t("video.qualityLow")}</option>
+            </select>
 
-        <button onClick={handleConvert} disabled={isConverting} style={btn}>
-          {isConverting ? t("video.converting") : hasTrim ? t("video.trimAndConvert") : t("video.convertToMp4")}
-        </button>
+            <button onClick={handleConvert} disabled={isConverting} style={btn}>
+              {isConverting ? t("video.converting") : hasTrim ? t("video.trimAndConvert") : t("video.convertToMp4")}
+            </button>
+          </>
+        )}
 
         <div style={{ flex: 1 }} />
 

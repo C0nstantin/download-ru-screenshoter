@@ -7,10 +7,31 @@ use crate::state::AppState;
 fn validate_recording_path(path: &str) -> Result<(), String> {
     let p = std::path::Path::new(path);
     let filename = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let in_tmp = p.parent() == Some(std::path::Path::new("/tmp"));
     let is_recording = filename.starts_with("recording_")
         && (filename.ends_with(".mov") || filename.ends_with(".mp4"));
-    if !in_tmp || !is_recording || path.contains("..") {
+
+    // Check parent directory is an allowed temp location
+    let in_allowed_dir = if cfg!(target_os = "windows") {
+        // On Windows, recordings go to %TEMP%
+        // Canonicalize both paths to handle case differences and trailing slashes
+        p.parent().map_or(false, |parent| {
+            let tmp = std::env::temp_dir();
+            // Compare canonicalized paths, fallback to string comparison
+            match (parent.canonicalize(), tmp.canonicalize()) {
+                (Ok(a), Ok(b)) => a.starts_with(&b) || a == b,
+                _ => {
+                    // Fallback: case-insensitive string compare
+                    let pp = parent.to_str().unwrap_or("").to_lowercase();
+                    let tp = tmp.to_str().unwrap_or("").to_lowercase();
+                    pp.starts_with(&tp)
+                }
+            }
+        })
+    } else {
+        p.parent() == Some(std::path::Path::new("/tmp"))
+    };
+
+    if !in_allowed_dir || !is_recording || path.contains("..") {
         return Err(format!("Access denied: path not allowed: {}", path));
     }
     Ok(())
@@ -166,10 +187,17 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
         return Ok(());
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let output_path = make_output_path_windows();
+        start_windows_recording(&app, &state, None, &output_path)?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
     {
         let _ = (app, state);
-        Err("Video recording not yet implemented on this platform. See VIDEO_RECORDING.md".into())
+        Err("Video recording not yet implemented on Linux. See VIDEO_RECORDING.md".into())
     }
 }
 
@@ -204,12 +232,20 @@ pub fn start_video_recording(
         return Ok(());
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        // TODO: Linux — ffmpeg -video_size WxH -framerate 30 -f x11grab -i :0.0+X,Y output.mp4
-        // TODO: Windows — ffmpeg -f gdigrab -offset_x X -offset_y Y -video_size WxH -i desktop output.mp4
+        let output_path = make_output_path_windows();
+        // Windows recording captures full monitor, region is noted but not cropped live
+        // (similar to how macOS screencapture -v -R works)
+        let _ = (x, y, width, height);
+        start_windows_recording(&app, &state, None, &output_path)?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
         let _ = (app, state, x, y, width, height);
-        Err("Region video recording not yet implemented on this platform. See VIDEO_RECORDING.md".into())
+        Err("Region video recording not yet implemented on Linux. See VIDEO_RECORDING.md".into())
     }
 }
 
@@ -284,11 +320,17 @@ pub fn start_video_capture_window(app: AppHandle, state: State<'_, AppState>) ->
         return Ok(());
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        // TODO: Linux/Windows — window selection not yet implemented
+        let output_path = make_output_path_windows();
+        start_windows_recording(&app, &state, None, &output_path)?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
         let _ = (app, state);
-        Err("Window video recording not yet implemented on this platform. See VIDEO_RECORDING.md".into())
+        Err("Window video recording not yet implemented on Linux. See VIDEO_RECORDING.md".into())
     }
 }
 
@@ -334,15 +376,29 @@ pub fn set_tray_recording_mode(app: &AppHandle, recording: bool) {
 /// Stop recording — called from tray menu or from frontend command.
 /// Sends SIGINT to screencapture, the background monitor thread handles the rest.
 pub fn stop_recording_internal(app: &AppHandle) -> Result<String, String> {
+    tracing::info!("stop_recording_internal called");
     let state = app.state::<AppState>();
 
     let path = {
         let p = state.recording_path.lock().unwrap();
-        p.clone().ok_or("No recording in progress")?
+        p.clone().ok_or_else(|| {
+            tracing::warn!("stop_recording: no recording path in state");
+            "No recording in progress".to_string()
+        })?
     };
+    tracing::info!(path = %path, "stopping recording");
 
-    // Send SIGINT to screencapture via stored PID
+    // Stop recording
+    #[cfg(target_os = "windows")]
     {
+        // Signal the Windows recording thread to stop
+        state.recording_stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        tracing::info!("recording_stop_flag set to true");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Send SIGINT to screencapture via stored PID
         let mut pid_guard = state.recording_pid.lock().unwrap();
         if let Some(pid) = pid_guard.take() {
             let _ = std::process::Command::new("kill")
@@ -464,7 +520,18 @@ pub async fn convert_to_mp4(
         return Ok(dst_path);
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, recording is already MP4/H.264 — no conversion needed.
+        // Trim is not yet supported (would require re-encoding).
+        let _ = (preset, dst_path);
+        if start_sec.filter(|&s| s > 0.0).is_some() || duration_sec.filter(|&d| d > 0.0).is_some() {
+            return Err("Trimming is not yet supported on Windows. Save the file and trim externally.".into());
+        }
+        return Ok(src_path);
+    }
+
+    #[cfg(target_os = "linux")]
     Err("Conversion not yet supported on this platform".into())
 }
 
@@ -627,5 +694,148 @@ pub fn toggle_mute_mic(state: State<'_, AppState>) -> Result<bool, String> {
 #[tauri::command]
 pub fn is_mic_muted(state: State<'_, AppState>) -> bool {
     state.saved_input_volume.lock().unwrap().is_some()
+}
+
+// ── Windows screen recording via windows-capture ──────────────────
+
+#[cfg(target_os = "windows")]
+fn make_output_path_windows() -> String {
+    let tmp = std::env::temp_dir();
+    let filename = format!("recording_{}.mp4", uuid::Uuid::new_v4());
+    tmp.join(filename).to_string_lossy().to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn start_windows_recording(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    _monitor_index: Option<usize>,
+    output_path: &str,
+) -> Result<(), String> {
+    use windows_capture::{
+        capture::{Context, GraphicsCaptureApiHandler},
+        encoder::{AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder},
+        frame::Frame,
+        graphics_capture_api::InternalCaptureControl,
+        monitor::Monitor,
+        settings::{ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+                   MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings},
+    };
+
+    tracing::info!(output = %output_path, "starting Windows screen recording");
+
+    // Reset stop flag
+    state.recording_stop_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    let stop_flag = state.recording_stop_flag.clone();
+
+    // Get primary monitor
+    let monitor = Monitor::primary().map_err(|e| format!("Failed to get primary monitor: {}", e))?;
+
+    // Store recording path
+    {
+        let mut p = state.recording_path.lock().unwrap();
+        *p = Some(output_path.to_string());
+    }
+    {
+        let mut l = state.last_recording_path.lock().unwrap();
+        *l = Some(output_path.to_string());
+    }
+
+    // Update tray to show stop button
+    set_tray_recording_mode(app, true);
+
+    let output_path_owned = output_path.to_string();
+    let app_clone = app.clone();
+
+    struct CaptureHandler {
+        encoder: Option<VideoEncoder>,
+        stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl GraphicsCaptureApiHandler for CaptureHandler {
+        type Flags = (std::sync::Arc<std::sync::atomic::AtomicBool>, String);
+        type Error = Box<dyn std::error::Error + Send + Sync>;
+
+        fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
+            let (stop_flag, output_path) = ctx.flags;
+
+            let monitor = Monitor::primary()?;
+            let width = monitor.width()?;
+            let height = monitor.height()?;
+
+            let encoder = VideoEncoder::new(
+                VideoSettingsBuilder::new(width, height),
+                AudioSettingsBuilder::default().disabled(true),
+                ContainerSettingsBuilder::default(),
+                &output_path,
+            )?;
+            Ok(Self { encoder: Some(encoder), stop_flag })
+        }
+
+        fn on_frame_arrived(
+            &mut self,
+            frame: &mut Frame,
+            capture_control: InternalCaptureControl,
+        ) -> Result<(), Self::Error> {
+            if self.stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                tracing::info!("stop flag detected, finalizing encoder");
+                if let Some(encoder) = self.encoder.take() {
+                    encoder.finish()?;
+                }
+                capture_control.stop();
+                tracing::info!("capture_control.stop() called");
+                return Ok(());
+            }
+            if let Some(ref mut encoder) = self.encoder {
+                encoder.send_frame(frame)?;
+            }
+            Ok(())
+        }
+
+        fn on_closed(&mut self) -> Result<(), Self::Error> {
+            if let Some(encoder) = self.encoder.take() {
+                encoder.finish()?;
+            }
+            Ok(())
+        }
+    }
+
+    let settings = Settings::new(
+        monitor,
+        CursorCaptureSettings::Default,
+        DrawBorderSettings::WithoutBorder,
+        SecondaryWindowSettings::Default,
+        MinimumUpdateIntervalSettings::Default,
+        DirtyRegionSettings::Default,
+        ColorFormat::Bgra8,
+        (stop_flag, output_path_owned.clone()),
+    );
+
+    std::thread::spawn(move || {
+        tracing::info!("recording thread started, calling CaptureHandler::start");
+        let result = CaptureHandler::start(settings);
+        tracing::info!(ok = result.is_ok(), "CaptureHandler::start returned");
+
+        if let Err(e) = &result {
+            tracing::error!(error = %e, "Windows recording error");
+        }
+
+        let state = app_clone.state::<AppState>();
+        { let mut p = state.recording_path.lock().unwrap(); *p = None; }
+
+        set_tray_recording_mode(&app_clone, false);
+
+        if std::fs::metadata(&output_path_owned).is_ok() {
+            tracing::info!(path = %output_path_owned, "recording file exists, opening result window");
+            { let mut l = state.last_recording_path.lock().unwrap(); *l = Some(output_path_owned.clone()); }
+            let _ = open_video_result_window(&app_clone, &output_path_owned);
+        } else {
+            tracing::info!("Recording cancelled — no file created");
+            let mut l = state.last_recording_path.lock().unwrap();
+            *l = None;
+        }
+    });
+
+    Ok(())
 }
 

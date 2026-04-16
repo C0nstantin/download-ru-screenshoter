@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
 
 pub struct AppState {
     pub current_screenshot: Mutex<Option<Vec<u8>>>,
@@ -12,6 +13,8 @@ pub struct AppState {
     /// Saved system input volume before muting (to restore on stop/unmute)
     pub saved_input_volume: Mutex<Option<u32>>,
     pub locale: Mutex<String>,
+    /// Flag to signal Windows recording to stop
+    pub recording_stop_flag: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
@@ -26,6 +29,7 @@ impl Default for AppState {
             last_recording_path: Mutex::new(None),
             saved_input_volume: Mutex::new(None),
             locale: Mutex::new("ru".to_string()),
+            recording_stop_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 }
