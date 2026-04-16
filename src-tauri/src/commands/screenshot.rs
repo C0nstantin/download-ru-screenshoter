@@ -58,9 +58,8 @@ pub fn get_displays() -> Result<Vec<DisplayInfo>, String> {
 
 /// Capture the primary screen and store in state
 #[tauri::command]
-pub fn capture_fullscreen(
-    _app: AppHandle,
-    state: State<'_, AppState>,
+pub async fn capture_fullscreen(
+    app: AppHandle,
 ) -> Result<ScreenshotData, String> {
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
 
@@ -76,6 +75,7 @@ pub fn capture_fullscreen(
         .map_err(|e| format!("Failed to encode PNG: {}", e))?;
 
     // Store in state
+    let state = app.state::<AppState>();
     {
         let mut current = state.current_screenshot.lock().unwrap();
         *current = Some(png_bytes.clone());
@@ -97,10 +97,11 @@ pub fn capture_fullscreen(
 
 /// Crop the current screenshot to a region
 #[tauri::command]
-pub fn crop_image(
+pub async fn crop_image(
     region: Region,
-    state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<ScreenshotData, String> {
+    let state = app.state::<AppState>();
     let png_bytes = {
         let current = state.current_screenshot.lock().unwrap();
         current.clone().ok_or("No screenshot in memory")?
@@ -141,9 +142,10 @@ pub fn crop_image(
 
 /// Get current screenshot as base64
 #[tauri::command]
-pub fn get_current_screenshot(
-    state: State<'_, AppState>,
+pub async fn get_current_screenshot(
+    app: AppHandle,
 ) -> Result<ScreenshotData, String> {
+    let state = app.state::<AppState>();
     let png_bytes = {
         let current = state.current_screenshot.lock().unwrap();
         current.clone().ok_or("No screenshot in memory")?
@@ -165,10 +167,10 @@ pub fn get_current_screenshot(
 
 /// Save screenshot to file
 #[tauri::command]
-pub fn save_screenshot(
+pub async fn save_screenshot(
     path: String,
     image_data: Option<String>,
-    state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<(), String> {
     // Block path traversal
     if path.contains("..") {
@@ -184,6 +186,7 @@ pub fn save_screenshot(
         BASE64.decode(base64_data)
             .map_err(|e| format!("Failed to decode base64: {}", e))?
     } else {
+        let state = app.state::<AppState>();
         let current = state.current_screenshot.lock().unwrap();
         current.clone().ok_or("No screenshot to save")?
     };
@@ -196,10 +199,11 @@ pub fn save_screenshot(
 
 /// Open editor window from frontend
 #[tauri::command]
-pub fn open_editor(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn open_editor(app: AppHandle) -> Result<(), String> {
     tracing::info!("open_editor called");
 
     let dims = {
+        let state = app.state::<AppState>();
         let dims = state.screenshot_dimensions.lock().unwrap();
         tracing::debug!(?dims, "dimensions from state");
         dims.clone().ok_or("No screenshot dimensions")?
@@ -208,7 +212,7 @@ pub fn open_editor(app: AppHandle, state: State<'_, AppState>) -> Result<(), Str
     tracing::info!(width = dims.0, height = dims.1, "creating editor with dimensions");
 
     // Small delay to ensure state is fully updated
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     create_editor_window(&app, dims.0, dims.1)
 }

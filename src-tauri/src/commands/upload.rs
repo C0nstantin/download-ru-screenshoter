@@ -65,7 +65,8 @@ struct TokenResponse {
 /// Flow: webview → login → Doorkeeper shows code on page →
 /// init_script + polling captures code → exchange with code_verifier → token saved.
 #[tauri::command]
-pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn open_oauth_browser(app: AppHandle) -> Result<(), String> {
+    tracing::info!("open_oauth_browser called");
     let code_verifier = generate_code_verifier();
     let code_challenge = compute_code_challenge(&code_verifier);
 
@@ -79,7 +80,7 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
     );
 
     let app_clone = app.clone();
-    let token_arc = state.access_token.clone();
+    let token_arc = app.state::<AppState>().access_token.clone();
     let code_captured = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let code_captured_close = std::sync::Arc::clone(&code_captured);
 
@@ -129,6 +130,8 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
     {
         builder = builder.data_directory(oauth_data_dir.clone());
     }
+
+    tracing::info!(url = %url, "opening OAuth webview window");
 
     let win = builder
     .on_navigation(move |nav_url| {
@@ -218,7 +221,12 @@ pub fn open_oauth_browser(app: AppHandle, state: State<'_, AppState>) -> Result<
         true
     })
     .build()
-    .map_err(|e| format!("Failed to open auth window: {}", e))?;
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to build OAuth window");
+        format!("Failed to open auth window: {}", e)
+    })?;
+
+    tracing::info!("OAuth window created successfully");
 
     // Emit false if user closed manually without completing auth, clean up temp data dir
     let app_for_close = app.clone();

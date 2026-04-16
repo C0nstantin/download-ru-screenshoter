@@ -287,6 +287,7 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
       <canvas
         ref={canvasRef}
         className="overlay-canvas"
+        style={(selection && !isSelecting) ? { pointerEvents: 'none' } : undefined}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -301,7 +302,7 @@ function OverlayPage({ mode = "screenshot" }: { mode?: "screenshot" | "video" })
       )}
       {/* Buttons for platforms where keyboard might not work */}
       {selection && !isSelecting && (
-        <div className="overlay-buttons">
+        <div className="overlay-buttons" onMouseDown={(e) => e.stopPropagation()}>
           <button onClick={confirmSelection} className="overlay-btn confirm">
             ✓ {t("overlay.confirm")}
           </button>
