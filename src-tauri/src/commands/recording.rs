@@ -352,17 +352,24 @@ pub fn set_tray_recording_mode(app: &AppHandle, recording: bool) {
             MenuItem::with_id(app, "quit", tr.quit, true, None::<&str>).unwrap(),
         ]
     } else {
-        // Normal mode: all screenshot and video items
-        vec![
+        // Normal mode: all screenshot and video items.
+        // Region / window video recording are not yet implemented on Windows —
+        // omit those two menu items there to keep the tray menu consistent with
+        // what's actually functional on that platform.
+        let mut v = vec![
             MenuItem::with_id(app, "screenshot", format!("{} ({})", tr.screenshot_region, hotkeys.region), true, None::<&str>).unwrap(),
             MenuItem::with_id(app, "screenshot_full", format!("{} ({})", tr.screenshot_fullscreen, hotkeys.fullscreen), true, None::<&str>).unwrap(),
             MenuItem::with_id(app, "screenshot_window", format!("{} ({})", tr.screenshot_window, hotkeys.window), true, None::<&str>).unwrap(),
             MenuItem::with_id(app, "video_screen", tr.video_screen, true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "video_region", tr.video_region, true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "video_window", tr.video_window, true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "settings", tr.settings, true, None::<&str>).unwrap(),
-            MenuItem::with_id(app, "quit", tr.quit, true, None::<&str>).unwrap(),
-        ]
+        ];
+        #[cfg(not(target_os = "windows"))]
+        {
+            v.push(MenuItem::with_id(app, "video_region", tr.video_region, true, None::<&str>).unwrap());
+            v.push(MenuItem::with_id(app, "video_window", tr.video_window, true, None::<&str>).unwrap());
+        }
+        v.push(MenuItem::with_id(app, "settings", tr.settings, true, None::<&str>).unwrap());
+        v.push(MenuItem::with_id(app, "quit", tr.quit, true, None::<&str>).unwrap());
+        v
     };
 
     let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();

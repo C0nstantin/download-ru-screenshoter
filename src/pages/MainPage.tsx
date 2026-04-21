@@ -57,6 +57,16 @@ function MainPage() {
     return () => { unlisten.then((f) => f()); };
   }, []);
 
+  // Focus the hotkey input after React commits the re-render.
+  // setTimeout(0) was unreliable: on first click the macrotask could fire
+  // before the input was mounted, leaving the field visible but not focused,
+  // so the first keystroke was dropped and a second click was needed.
+  useEffect(() => {
+    if (editingHotkey && hotkeyInputRef.current) {
+      hotkeyInputRef.current.focus();
+    }
+  }, [editingHotkey]);
+
   const handleLogin = async () => {
     try {
       setIsWaiting(true);
@@ -124,7 +134,7 @@ function MainPage() {
   const startEditingHotkey = async (type: "region" | "fullscreen" | "window") => {
     await invoke("unregister_hotkeys");
     setEditingHotkey(type);
-    setTimeout(() => hotkeyInputRef.current?.focus(), 0);
+    // Focus happens in the useEffect above — guaranteed to run after commit.
   };
 
   const cancelEditingHotkey = () => {

@@ -162,12 +162,19 @@ pub fn run() {
             let snap_full_i = MenuItem::with_id(&handle, "screenshot_full", format!("{} (Ctrl+Shift+3)", tr.screenshot_fullscreen), true, None::<&str>)?;
             let snap_win_i = MenuItem::with_id(&handle, "screenshot_window", format!("{} (Ctrl+Shift+Alt+3)", tr.screenshot_window), true, None::<&str>)?;
             let video_screen_i = MenuItem::with_id(&handle, "video_screen", tr.video_screen, true, None::<&str>)?;
+            // Region / window video recording are not yet implemented on Windows —
+            // hide them from the tray menu there to avoid broken UX.
+            #[cfg(not(target_os = "windows"))]
             let video_region_i = MenuItem::with_id(&handle, "video_region", tr.video_region, true, None::<&str>)?;
+            #[cfg(not(target_os = "windows"))]
             let video_window_i = MenuItem::with_id(&handle, "video_window", tr.video_window, true, None::<&str>)?;
             let settings_i = MenuItem::with_id(&handle, "settings", tr.settings, true, None::<&str>)?;
             let quit_i = MenuItem::with_id(&handle, "quit", tr.quit, true, None::<&str>)?;
 
+            #[cfg(not(target_os = "windows"))]
             let menu = Menu::with_items(&handle, &[&snap_i, &snap_full_i, &snap_win_i, &video_screen_i, &video_region_i, &video_window_i, &settings_i, &quit_i])?;
+            #[cfg(target_os = "windows")]
+            let menu = Menu::with_items(&handle, &[&snap_i, &snap_full_i, &snap_win_i, &video_screen_i, &settings_i, &quit_i])?;
 
             let tray_icon_bytes = include_bytes!("../icons/tray-icon.png");
             let tray_icon = tauri::image::Image::from_bytes(tray_icon_bytes)
