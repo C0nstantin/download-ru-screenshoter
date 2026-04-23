@@ -632,6 +632,7 @@ fn open_video_result_window(app: &AppHandle, _path: &str) -> Result<(), String> 
     )
     .title(crate::i18n::current(app).recording_finished)
     .inner_size(560.0, 480.0)
+    .min_inner_size(400.0, 300.0)
     .resizable(true)
     .center()
     .build()

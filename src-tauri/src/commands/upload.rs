@@ -121,6 +121,7 @@ pub async fn open_oauth_browser(app: AppHandle) -> Result<(), String> {
     )
     .title(crate::i18n::current(&app).oauth_title)
     .inner_size(900.0, 650.0)
+    .min_inner_size(400.0, 300.0)
     .resizable(true)
     .visible(true)
     .initialization_script(init_script);

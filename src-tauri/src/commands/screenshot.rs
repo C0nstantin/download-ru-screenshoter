@@ -741,6 +741,7 @@ fn create_editor_window(app: &AppHandle, width: u32, height: u32) -> Result<(), 
     let result = WebviewWindowBuilder::new(app, "editor", WebviewUrl::App(url.into()))
         .title(tr.editor_title)
         .inner_size(win_width, win_height)
+        .min_inner_size(400.0, 300.0)
         .resizable(true)
         .center()
         .build();

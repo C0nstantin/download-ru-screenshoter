@@ -15,10 +15,12 @@
       {
         "label": "main",
         "title": "DownloadRu Screenshoter - Настройки",
-        "width": 450,
-        "height": 400,
+        "width": 460,
+        "height": 520,
         "visible": false,
-        "resizable": false,
+        "resizable": true,
+        "minWidth": 400,
+        "minHeight": 400,
         "center": true
       }
     ],
