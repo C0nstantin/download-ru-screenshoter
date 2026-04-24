@@ -352,6 +352,11 @@ fn set_locale(app: AppHandle, locale: String) {
     }
     // Rebuild tray menu in new language
     commands::recording::set_tray_recording_mode(&app, false);
+    // Update settings window title
+    let tr = i18n::current(&app);
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_title(tr.settings_title);
+    }
 }
 
 #[tauri::command]
@@ -386,6 +391,8 @@ fn show_settings_window(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     activate_as_regular(app);
     if let Some(window) = app.get_webview_window("main") {
+        let tr = i18n::current(app);
+        let _ = window.set_title(tr.settings_title);
         let _ = window.show();
         let _ = window.set_focus();
     }

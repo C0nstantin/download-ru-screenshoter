@@ -390,12 +390,27 @@ pub fn load_saved_token(
     }
 }
 
-/// Logout - open sign_out page in webview, then clear local tokens
+/// Logout - clear local tokens and sign out via webview
 #[tauri::command]
-pub fn logout(
+pub async fn logout(
     app: AppHandle,
-    state: State<'_, AppState>,
 ) -> Result<(), String> {
+    tracing::info!("logout called");
+
+    // Clear local tokens first
+    let state = app.state::<AppState>();
+    let store = app.store(STORE_FILE)
+        .map_err(|e| format!("Failed to open store: {}", e))?;
+    store.delete("access_token");
+    store.delete("refresh_token");
+    store.save().map_err(|e| format!("Failed to save store: {}", e))?;
+
+    {
+        let mut access_token = state.access_token.lock().unwrap();
+        *access_token = None;
+    }
+
+    // Open sign_out page in a hidden webview (just to clear server session)
     let app_clone = app.clone();
     let _win = tauri::WebviewWindowBuilder::new(
         &app,
@@ -407,9 +422,11 @@ pub fn logout(
     )
     .title(crate::i18n::current(&app).signout_title)
     .inner_size(400.0, 300.0)
+    .visible(false)
     .build()
     .map_err(|e| format!("Failed to open signout window: {}", e))?;
 
+    // Close signout window after brief delay
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         if let Some(w) = app_clone.get_webview_window("signout") {
@@ -417,14 +434,6 @@ pub fn logout(
         }
     });
 
-    let store = app.store(STORE_FILE)
-        .map_err(|e| format!("Failed to open store: {}", e))?;
-    store.delete("access_token");
-    store.delete("refresh_token");
-    store.save().map_err(|e| format!("Failed to save store: {}", e))?;
-
-    let mut access_token = state.access_token.lock().unwrap();
-    *access_token = None;
     Ok(())
 }
 
