@@ -365,6 +365,13 @@ pub fn start_region_capture_overlay_video(app: AppHandle) -> Result<(), String> 
 }
 
 pub fn start_region_capture_overlay(app: AppHandle) -> Result<(), String> {
+    // If overlay is already open, just focus it (prevents double-open race)
+    if let Some(existing) = app.get_webview_window("overlay") {
+        tracing::info!("overlay already open, focusing");
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
     let state = app.state::<AppState>();
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
 
@@ -646,10 +653,11 @@ fn capture_window_macos(app: AppHandle) -> Result<(), String> {
 }
 
 fn create_overlay_window(app: &AppHandle, _offset_x: i32, _offset_y: i32, _total_width: u32, _total_height: u32) -> Result<(), String> {
-    // Close existing if any
+    // Destroy existing overlay if any (use destroy, not close — more reliable on Windows)
     if let Some(existing) = app.get_webview_window("overlay") {
-        let _ = existing.close();
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        tracing::info!("destroying existing overlay window");
+        let _ = existing.destroy();
+        std::thread::sleep(std::time::Duration::from_millis(300));
     }
 
     // Calculate logical bounding box of all screens
