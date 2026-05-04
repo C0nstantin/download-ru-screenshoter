@@ -10,6 +10,23 @@ interface HotkeyConfig {
   window: string;
 }
 
+type DiagnosticReport = {
+  app_version: string;
+  os: string;
+  arch: string;
+  desktop_env: string | null;
+  session_type: string | null;
+  display_count: number;
+  displays: Array<{ id: number; width: number; height: number; x: number; y: number; scale: number; is_primary: boolean }>;
+  screenshot_test: string;
+  log_path: string;
+  api_url: string;
+  gnome_shell_version?: string | null;
+  has_ayatana_appindicator?: boolean | null;
+  gnome_extensions?: string[] | null;
+  appindicator_extension_enabled?: boolean | null;
+};
+
 function MainPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
@@ -23,6 +40,7 @@ function MainPage() {
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
   const [devMode, setDevMode] = useState(false);
   const [isBeta, setIsBeta] = useState(false);
+  const [report, setReport] = useState<DiagnosticReport | null>(null);
   const { t } = useTranslation();
   const { locale, setLocale } = useI18nStore();
 
@@ -41,6 +59,10 @@ function MainPage() {
         invoke<string>("get_api_url").then((url) => setIsBeta(url.includes("beta.")));
       }
     });
+
+    invoke<DiagnosticReport>("run_diagnostics")
+      .then(setReport)
+      .catch(console.error);
 
     // Auto-capture when OAuth completes in webview
     const unlisten = listen<boolean>("oauth-complete", (event) => {
@@ -241,19 +263,58 @@ function MainPage() {
           style={{ fontSize: 12, opacity: 0.7 }}
           onClick={async () => {
             try {
-              const report = await invoke<Record<string, unknown>>("run_diagnostics");
               const text = JSON.stringify(report, null, 2);
               await navigator.clipboard.writeText(text);
-              setStatus("Diagnostic copied to clipboard");
+              setStatus(t("main.diagnosticCopied"));
               setTimeout(() => setStatus(""), 3000);
             } catch (err) {
-              setStatus(String(err));
+              setStatus(t("main.error", { msg: String(err) }));
             }
           }}
         >
           📋 Copy Diagnostics
         </button>
       </section>
+
+      {report?.os.startsWith("linux") && report && (
+        <section className="section" style={{ borderTop: "1px solid #eee", marginTop: 12, paddingTop: 12 }}>
+          <h2>{t("main.linuxHealth")}</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14 }}>
+            <div style={{ color: "#666" }}>
+              {report.gnome_shell_version
+                ? t("main.gnomeShellVersion", { version: report.gnome_shell_version })
+                : t("main.gnomeShellUnknown")}
+            </div>
+            <div>
+              {report.has_ayatana_appindicator ? (
+                <span style={{ color: "#2a2" }}>✅ {t("main.appindicatorOk")}</span>
+              ) : (
+                <span>
+                  ❌ <span style={{ color: "#c00" }}>{t("main.appindicatorMissing")}</span>
+                  <br />
+                  <code style={{ color: "#c00", fontSize: 12 }}>{t("main.appindicatorMissingHint")}</code>
+                </span>
+              )}
+            </div>
+            <div>
+              {report.appindicator_extension_enabled ? (
+                <span style={{ color: "#2a2" }}>✅ {t("main.trayExtOk")}</span>
+              ) : (
+                <span>
+                  ❌ <span style={{ color: "#c00" }}>{t("main.trayExtMissing")}</span>
+                  <br />
+                  <code style={{ color: "#c00", fontSize: 12 }}>{t("main.trayExtHint")}</code>
+                </span>
+              )}
+            </div>
+            {report.gnome_extensions && report.gnome_extensions.length > 0 && (
+              <div style={{ color: "#666" }}>
+                {t("main.extensionsCount", { count: String(report.gnome_extensions.length) })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
     </main>
   );
 }

@@ -23,7 +23,18 @@
     "needModifier": "Нужно использовать модификатор (Ctrl, Cmd, Alt, Shift)",
     "hotkeysSaved": "Горячие клавиши сохранены!",
     "error": "Ошибка: {msg}",
-    "language": "Язык"
+    "language": "Язык",
+    "linuxHealth": "Linux Health Check",
+    "gnomeShellVersion": "GNOME Shell: {version}",
+    "gnomeShellUnknown": "GNOME Shell: не определена",
+    "appindicatorOk": "Системный трей: библиотека установлена",
+    "appindicatorMissing": "Системный трей: библиотека отсутствует",
+    "appindicatorMissingHint": "Установите: sudo apt install libayatana-appindicator3-1",
+    "trayExtOk": "Расширение GNOME для tray: включено",
+    "trayExtMissing": "Расширение GNOME для tray: не включено",
+    "trayExtHint": "Установите расширение AppIndicator and KStatusNotifierItem Support и перезапустите GNOME (Alt+F2 → r)",
+    "extensionsCount": "Включено расширений GNOME: {count}",
+    "diagnosticCopied": "Диагностика скопирована в буфер обмена"
   },
   "editor": {
     "loading": "Загрузка...",

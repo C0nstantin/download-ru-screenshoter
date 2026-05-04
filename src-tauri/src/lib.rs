@@ -4,6 +4,9 @@ pub mod i18n;
 mod state;
 mod upload;
 
+#[cfg(target_os = "linux")]
+mod linux_env;
+
 use std::io::{Read, Seek, SeekFrom};
 use tauri::{AppHandle, Manager};
 use tauri::menu::{Menu, MenuItem};
@@ -173,6 +176,8 @@ pub fn run() {
             let tray_icon = tauri::image::Image::from_bytes(tray_icon_bytes)
                 .expect("failed to load tray icon");
 
+            tracing::info!("creating tray icon");
+
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(tray_icon)
                 .icon_as_template(true)
@@ -223,6 +228,24 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            tracing::info!("tray icon created successfully");
+
+            #[cfg(target_os = "linux")]
+            {
+                if !linux_env::is_sni_watcher_available() {
+                    tracing::warn!("SNI watcher not available — falling back to visible window mode");
+                    show_settings_window(&handle);
+                    // TODO: i18n
+                    use tauri_plugin_notification::NotificationExt;
+                    let _ = handle.notification().builder()
+                        .title("DownloadRu Screenshoter")
+                        .body("Приложение запущено. Хоткей Ctrl+Shift+4 — скриншот области.")
+                        .show();
+                } else {
+                    tracing::info!("SNI watcher available — running in tray-only mode");
+                }
+            }
 
             // Initialize API base URL from env var or stored preference
             config::init(&handle);

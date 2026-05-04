@@ -23,7 +23,18 @@
     "needModifier": "A modifier key is required (Ctrl, Cmd, Alt, Shift)",
     "hotkeysSaved": "Hotkeys saved!",
     "error": "Error: {msg}",
-    "language": "Language"
+    "language": "Language",
+    "linuxHealth": "Linux Health Check",
+    "gnomeShellVersion": "GNOME Shell: {version}",
+    "gnomeShellUnknown": "GNOME Shell: unknown",
+    "appindicatorOk": "System tray: library installed",
+    "appindicatorMissing": "System tray: library missing",
+    "appindicatorMissingHint": "Install: sudo apt install libayatana-appindicator3-1",
+    "trayExtOk": "GNOME tray extension: enabled",
+    "trayExtMissing": "GNOME tray extension: not enabled",
+    "trayExtHint": "Install AppIndicator and KStatusNotifierItem Support extension and restart GNOME (Alt+F2 → r)",
+    "extensionsCount": "GNOME extensions enabled: {count}",
+    "diagnosticCopied": "Diagnostics copied to clipboard"
   },
   "editor": {
     "loading": "Loading...",
