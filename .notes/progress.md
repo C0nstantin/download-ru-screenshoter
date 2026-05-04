@@ -92,3 +92,15 @@
 - `lib.rs`: добавлен `mod screencast_portal` за `#[cfg(target_os = "linux")]`.
 - `cargo check` — зелёный (все `dead_code` warnings pre-existing).
 
+## Подзадача 5b — ffmpeg recording wrapper
+
+**Status**: done (compiles, not yet integrated).
+
+**What was done**:
+- Создан `src-tauri/src/screencast_record.rs` с `start_ffmpeg_recording(node_id, output_path)` и `stop_ffmpeg_recording(child)`.
+- `start_ffmpeg_recording`: спавнит `ffmpeg -f pipewire -i <node_id> -c:v libx264 -preset ultrafast -pix_fmt yuv420p -y <output>`.
+- `stop_ffmpeg_recording`: шлёт `kill -INT` для graceful finalization MP4, затем `child.wait()`.
+- Оба используют `tracing::info!` для start/stop.
+- Подключён в `lib.rs` за `#[cfg(target_os = "linux")]`.
+- `cargo check` — зелёный. No new deps. No `unsafe`.
+
