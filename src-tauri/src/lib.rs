@@ -10,6 +10,9 @@ mod linux_env;
 #[cfg(target_os = "linux")]
 mod screen_capture_portal;
 
+#[cfg(target_os = "linux")]
+mod screencast_portal;
+
 use std::io::{Read, Seek, SeekFrom};
 use tauri::{AppHandle, Manager};
 use tauri::menu::{Menu, MenuItem};

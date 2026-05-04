@@ -74,3 +74,21 @@
 - `screen_capture_portal.rs`: удалена локальная `percent_decode_str` (-16 строк), вызов заменён на `crate::percent_decode`.
 - `cargo check` — зелёный, 0 новых предупреждений.
 
+## Подзадача 5a — ScreenCast portal session
+
+**Status**: done (compiles, not yet integrated).
+
+**What was done**:
+- `Cargo.toml`: добавлен `"screencast"` в features `ashpd`.
+- Создан `src-tauri/src/screencast_portal.rs` с `ScreencastSession` — асинхронная обёртка над `ashpd::desktop::screencast::Screencast`.
+- `ScreencastSession::start()` выполняет полный цикл: `create_session` → `select_sources` (monitor/window, cursor embedded, single source) → `start` (показывает portal picker) → `open_pipe_wire_remote` → возвращает `ScreencastSession { proxy, session, pipewire_fd, stream_node_id }`.
+- `ScreencastSession::close()` закрывает portal session.
+- API сверен с `ashpd` 0.13 source code через context7/docs.rs:
+  - `create_session(Default::default())` — принимает `CreateSessionOptions`
+  - `select_sources` через `SelectSourcesOptions` builder (не raw params)
+  - `start(&session, None, StartCastOptions::default()).await?.response()?`
+  - `open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default())`
+  - `stream.pipe_wire_node_id()` — `u32`
+- `lib.rs`: добавлен `mod screencast_portal` за `#[cfg(target_os = "linux")]`.
+- `cargo check` — зелёный (все `dead_code` warnings pre-existing).
+
