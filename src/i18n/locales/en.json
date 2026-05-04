@@ -35,6 +35,10 @@
     "trayExtHint": "Install AppIndicator and KStatusNotifierItem Support extension and restart GNOME (Alt+F2 → r)",
     "extensionsCount": "GNOME extensions enabled: {count}",
     "diagnosticCopied": "Diagnostics copied to clipboard",
+    "screenshotPortalOk": "Screenshot portal: available (Wayland screenshots will work)",
+    "screenshotPortalMissing": "Screenshot portal: unavailable — install xdg-desktop-portal-gnome / -kde",
+    "screencastPortalOk": "ScreenCast portal: available (Wayland recording will work)",
+    "screencastPortalMissing": "ScreenCast portal: unavailable — install xdg-desktop-portal with ScreenCast support",
     "globalShortcutsOk": "Global hotkeys: portal supported",
     "globalShortcutsMissing": "Global hotkeys: portal not available",
     "globalShortcutsHint": "On Wayland without xdg-desktop-portal 1.18+ global hotkeys will not work — set Ctrl+Shift+4 manually in System Settings → Keyboard"

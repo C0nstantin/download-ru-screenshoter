@@ -33,6 +33,10 @@ pub struct DiagnosticReport {
     #[cfg(target_os = "linux")]
     pub appindicator_extension_enabled: Option<bool>,
     #[cfg(target_os = "linux")]
+    pub screenshot_portal_available: bool,
+    #[cfg(target_os = "linux")]
+    pub screencast_portal_available: bool,
+    #[cfg(target_os = "linux")]
     pub global_shortcuts_portal_available: bool,
     pub display_count: usize,
     pub displays: Vec<DisplayDiag>,
@@ -120,6 +124,10 @@ pub fn run_diagnostics(app: AppHandle) -> DiagnosticReport {
     };
 
     #[cfg(target_os = "linux")]
+    let screenshot_portal_available = crate::linux_env::is_screenshot_portal_available();
+    #[cfg(target_os = "linux")]
+    let screencast_portal_available = crate::linux_env::is_screencast_portal_available();
+    #[cfg(target_os = "linux")]
     let global_shortcuts_portal_available = crate::linux_env::is_global_shortcuts_portal_available();
 
     #[cfg(target_os = "linux")]
@@ -163,6 +171,10 @@ pub fn run_diagnostics(app: AppHandle) -> DiagnosticReport {
         gnome_extensions,
         #[cfg(target_os = "linux")]
         appindicator_extension_enabled,
+        #[cfg(target_os = "linux")]
+        screenshot_portal_available,
+        #[cfg(target_os = "linux")]
+        screencast_portal_available,
         #[cfg(target_os = "linux")]
         global_shortcuts_portal_available,
         display_count: displays.len(),

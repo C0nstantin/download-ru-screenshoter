@@ -35,6 +35,10 @@
     "trayExtHint": "Установите расширение AppIndicator and KStatusNotifierItem Support и перезапустите GNOME (Alt+F2 → r)",
     "extensionsCount": "Включено расширений GNOME: {count}",
     "diagnosticCopied": "Диагностика скопирована в буфер обмена",
+    "screenshotPortalOk": "Screenshot portal: доступен (Wayland скриншоты будут работать)",
+    "screenshotPortalMissing": "Screenshot portal: недоступен — установите xdg-desktop-portal-gnome / -kde",
+    "screencastPortalOk": "ScreenCast portal: доступен (Wayland запись будет работать)",
+    "screencastPortalMissing": "ScreenCast portal: недоступен — установите xdg-desktop-portal с поддержкой ScreenCast",
     "globalShortcutsOk": "Глобальные хоткеи: portal поддерживается",
     "globalShortcutsMissing": "Глобальные хоткеи: portal недоступен",
     "globalShortcutsHint": "На Wayland без xdg-desktop-portal 1.18+ хоткеи работать не будут — настройте Ctrl+Shift+4 вручную в System Settings → Keyboard"

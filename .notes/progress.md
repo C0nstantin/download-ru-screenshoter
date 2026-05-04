@@ -104,6 +104,24 @@
 - Подключён в `lib.rs` за `#[cfg(target_os = "linux")]`.
 - `cargo check` — зелёный. No new deps. No `unsafe`.
 
+## Подзадача: Portal availability detection (Screenshot + ScreenCast)
+
+**Status**: done.
+
+**What was done**:
+- `src-tauri/src/linux_env.rs`:
+  - Добавлен общий helper `is_portal_interface_available(interface: &str) -> bool` — вызывает `dbus-send` Introspect, ищет имя интерфейса в XML.
+  - `is_global_shortcuts_portal_available` переписан через хелпер (DRY).
+  - Добавлены `is_screenshot_portal_available()` и `is_screencast_portal_available()`.
+- `src-tauri/src/commands/settings.rs`:
+  - В `DiagnosticReport` добавлены `screenshot_portal_available: bool` и `screencast_portal_available: bool` за `#[cfg(target_os = "linux")]`.
+  - В `run_diagnostics` добавлены соответствующие вызовы.
+- `src/pages/MainPage.tsx`:
+  - В TS-тип `DiagnosticReport` добавлены поля `screenshot_portal_available` / `screencast_portal_available`.
+  - В Linux Health Check UI добавлены две строки перед globalShortcuts: зелёный ✅ / красный ❌ для Screenshot и ScreenCast portal.
+- `src/i18n/locales/ru.json` / `en.json`: Добавлены 4 ключа (`screenshotPortalOk`, `screenshotPortalMissing`, `screencastPortalOk`, `screencastPortalMissing`).
+- `cargo check` — зелёный (только pre-existing warnings). `npx tsc --noEmit` — чистый. Новых зависимостей нет.
+
 ## Подзадача 6 (lite) — GlobalShortcuts portal detection
 
 **Status**: done.

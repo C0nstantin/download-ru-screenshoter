@@ -25,6 +25,8 @@ type DiagnosticReport = {
   has_ayatana_appindicator?: boolean | null;
   gnome_extensions?: string[] | null;
   appindicator_extension_enabled?: boolean | null;
+  screenshot_portal_available?: boolean | null;
+  screencast_portal_available?: boolean | null;
   global_shortcuts_portal_available?: boolean | null;
 };
 
@@ -313,6 +315,20 @@ function MainPage() {
                 {t("main.extensionsCount", { count: String(report.gnome_extensions.length) })}
               </div>
             )}
+            <div>
+              {report.screenshot_portal_available ? (
+                <span style={{ color: "#2a2" }}>✅ {t("main.screenshotPortalOk")}</span>
+              ) : (
+                <span style={{ color: "#c00" }}>❌ {t("main.screenshotPortalMissing")}</span>
+              )}
+            </div>
+            <div>
+              {report.screencast_portal_available ? (
+                <span style={{ color: "#2a2" }}>✅ {t("main.screencastPortalOk")}</span>
+              ) : (
+                <span style={{ color: "#c00" }}>❌ {t("main.screencastPortalMissing")}</span>
+              )}
+            </div>
             <div>
               {report.global_shortcuts_portal_available ? (
                 <span style={{ color: "#2a2" }}>✅ {t("main.globalShortcutsOk")}</span>

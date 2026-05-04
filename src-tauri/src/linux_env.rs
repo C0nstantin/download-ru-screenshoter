@@ -35,10 +35,9 @@ pub fn is_sni_watcher_available() -> bool {
     }
 }
 
-/// Checks via DBus whether the GlobalShortcuts portal is available.
-/// Returns `true` if `org.freedesktop.portal.Desktop` exports the
-/// `org.freedesktop.portal.GlobalShortcuts` interface.
-pub fn is_global_shortcuts_portal_available() -> bool {
+/// Checks via DBus whether a portal interface is available.
+/// Introspects `org.freedesktop.portal.Desktop` and looks for `interface` in the XML output.
+fn is_portal_interface_available(interface: &str) -> bool {
     let result = std::process::Command::new("dbus-send")
         .args([
             "--session",
@@ -53,13 +52,28 @@ pub fn is_global_shortcuts_portal_available() -> bool {
     match result {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let available = stdout.contains("org.freedesktop.portal.GlobalShortcuts");
-            tracing::info!(available, "GlobalShortcuts portal detection");
+            let available = stdout.contains(interface);
+            tracing::info!(interface, available, "portal interface check");
             available
         }
         Err(e) => {
-            tracing::warn!(error = %e, "dbus-send failed for GlobalShortcuts portal check");
+            tracing::warn!(interface, error = %e, "dbus-send failed for portal check");
             false
         }
     }
+}
+
+/// Checks whether the Screenshot portal is available.
+pub fn is_screenshot_portal_available() -> bool {
+    is_portal_interface_available("org.freedesktop.portal.Screenshot")
+}
+
+/// Checks whether the ScreenCast portal is available.
+pub fn is_screencast_portal_available() -> bool {
+    is_portal_interface_available("org.freedesktop.portal.ScreenCast")
+}
+
+/// Checks whether the GlobalShortcuts portal is available.
+pub fn is_global_shortcuts_portal_available() -> bool {
+    is_portal_interface_available("org.freedesktop.portal.GlobalShortcuts")
 }
