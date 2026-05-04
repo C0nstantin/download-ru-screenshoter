@@ -164,3 +164,15 @@
   - Вместо этого — `tracing::info!` о том, что cleanup сделает monitor-thread.
 - `cargo check` — зелёный (0 новых warnings, только pre-existing).
 
+## Подзадача: i18n Linux notification
+
+**Status**: done.
+
+**What was done**:
+- `src-tauri/src/i18n.rs`: в `Translations` struct добавлены `notification_app_started_title` и `notification_app_started_body`. Заполнены в RU (русский) и EN (английский).
+- `src-tauri/src/lib.rs`: в `#[cfg(target_os = "linux")]` блоке SNI fallback:
+  - Перед notification — best-effort определение локали из `LANG` env var (если начинается с `en` → `AppState.locale = "en"`, иначе остаётся `"ru"`).
+  - Хардкод `title`/`body` заменён на `i18n::current(&handle).notification_app_started_*`.
+  - Удалён `// TODO: i18n`.
+- `cargo check` — зелёный. Новых зависимостей нет. macOS/Windows код не задет (блок под `#[cfg(target_os = "linux")]`).
+

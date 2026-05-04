@@ -29,6 +29,10 @@ pub struct Translations {
     // Window titles
     pub editor_title: &'static str,
     pub settings_title: &'static str,
+
+    // Linux notification (shown on startup when SNI watcher is missing)
+    pub notification_app_started_title: &'static str,
+    pub notification_app_started_body: &'static str,
 }
 
 pub static RU: Translations = Translations {
@@ -54,6 +58,9 @@ pub static RU: Translations = Translations {
 
     editor_title: "Редактор скриншота",
     settings_title: "DownloadRu Screenshoter - Настройки",
+
+    notification_app_started_title: "DownloadRu Screenshoter",
+    notification_app_started_body: "Приложение запущено. Хоткей Ctrl+Shift+4 — скриншот области.",
 };
 
 pub static EN: Translations = Translations {
@@ -79,6 +86,9 @@ pub static EN: Translations = Translations {
 
     editor_title: "Screenshot Editor",
     settings_title: "DownloadRu Screenshoter - Settings",
+
+    notification_app_started_title: "DownloadRu Screenshoter",
+    notification_app_started_body: "App is running. Hotkey Ctrl+Shift+4 — region screenshot.",
 };
 
 pub fn current(app: &AppHandle) -> &'static Translations {

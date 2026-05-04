@@ -248,11 +248,21 @@ pub fn run() {
                 if !linux_env::is_sni_watcher_available() {
                     tracing::warn!("SNI watcher not available — falling back to visible window mode");
                     show_settings_window(&handle);
-                    // TODO: i18n
+                    // Best-effort: detect locale from LANG env var so notification shows in user's language.
+                    // Default AppState.locale stays "ru" if LANG isn't English.
+                    {
+                        let lang = std::env::var("LANG").unwrap_or_default();
+                        if lang.to_lowercase().starts_with("en") {
+                            let state = handle.state::<AppState>();
+                            let mut l = state.locale.lock().unwrap();
+                            *l = "en".to_string();
+                        }
+                    }
+                    let tr = i18n::current(&handle);
                     use tauri_plugin_notification::NotificationExt;
                     let _ = handle.notification().builder()
-                        .title("DownloadRu Screenshoter")
-                        .body("Приложение запущено. Хоткей Ctrl+Shift+4 — скриншот области.")
+                        .title(tr.notification_app_started_title)
+                        .body(tr.notification_app_started_body)
                         .show();
                 } else {
                     tracing::info!("SNI watcher available — running in tray-only mode");
