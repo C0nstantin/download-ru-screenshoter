@@ -104,6 +104,21 @@
 - Подключён в `lib.rs` за `#[cfg(target_os = "linux")]`.
 - `cargo check` — зелёный. No new deps. No `unsafe`.
 
+## Подзадача 6 (lite) — GlobalShortcuts portal detection
+
+**Status**: done.
+
+**What was done**:
+- `src-tauri/src/linux_env.rs`: Добавлена `is_global_shortcuts_portal_available()` — вызывает `dbus-send` Introspect на `org.freedesktop.portal.Desktop`, ищет `org.freedesktop.portal.GlobalShortcuts` в XML.
+- `src-tauri/src/commands/settings.rs`:
+  - В `DiagnosticReport` добавлено поле `global_shortcuts_portal_available: bool` за `#[cfg(target_os = "linux")]`.
+  - В `run_diagnostics` добавлен вызов `is_global_shortcuts_portal_available()`.
+- `src/pages/MainPage.tsx`:
+  - В TS-тип `DiagnosticReport` добавлено `global_shortcuts_portal_available?: boolean | null`.
+  - В секцию Linux Health Check добавлена строка с зелёным ✅ / красным ❌ + подсказка.
+- `src/i18n/locales/ru.json` / `en.json`: Добавлены 3 ключа (`globalShortcutsOk`, `globalShortcutsMissing`, `globalShortcutsHint`).
+- `cargo check` — зелёный, `npx tsc --noEmit` — чистый. Новых зависимостей нет.
+
 ## Подзадача 5c — интеграция ScreenCast + ffmpeg в commands/recording.rs
 
 **Status**: done (`cargo check` зелёный).

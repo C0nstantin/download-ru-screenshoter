@@ -25,6 +25,7 @@ type DiagnosticReport = {
   has_ayatana_appindicator?: boolean | null;
   gnome_extensions?: string[] | null;
   appindicator_extension_enabled?: boolean | null;
+  global_shortcuts_portal_available?: boolean | null;
 };
 
 function MainPage() {
@@ -312,6 +313,17 @@ function MainPage() {
                 {t("main.extensionsCount", { count: String(report.gnome_extensions.length) })}
               </div>
             )}
+            <div>
+              {report.global_shortcuts_portal_available ? (
+                <span style={{ color: "#2a2" }}>✅ {t("main.globalShortcutsOk")}</span>
+              ) : (
+                <span>
+                  ❌ <span style={{ color: "#c00" }}>{t("main.globalShortcutsMissing")}</span>
+                  <br />
+                  <code style={{ color: "#c00", fontSize: 12 }}>{t("main.globalShortcutsHint")}</code>
+                </span>
+              )}
+            </div>
           </div>
         </section>
       )}

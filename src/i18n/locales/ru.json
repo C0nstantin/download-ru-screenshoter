@@ -34,7 +34,10 @@
     "trayExtMissing": "Расширение GNOME для tray: не включено",
     "trayExtHint": "Установите расширение AppIndicator and KStatusNotifierItem Support и перезапустите GNOME (Alt+F2 → r)",
     "extensionsCount": "Включено расширений GNOME: {count}",
-    "diagnosticCopied": "Диагностика скопирована в буфер обмена"
+    "diagnosticCopied": "Диагностика скопирована в буфер обмена",
+    "globalShortcutsOk": "Глобальные хоткеи: portal поддерживается",
+    "globalShortcutsMissing": "Глобальные хоткеи: portal недоступен",
+    "globalShortcutsHint": "На Wayland без xdg-desktop-portal 1.18+ хоткеи работать не будут — настройте Ctrl+Shift+4 вручную в System Settings → Keyboard"
   },
   "editor": {
     "loading": "Загрузка...",
