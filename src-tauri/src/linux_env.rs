@@ -1,5 +1,16 @@
 //! Linux-specific environment detection utilities.
 
+/// Detects whether the user runs a dark color scheme via gsettings.
+/// Returns `true` for `prefer-dark`, `false` otherwise.
+pub fn is_dark_theme() -> bool {
+    std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("prefer-dark"))
+        .unwrap_or(false)
+}
+
 /// Checks via DBus whether a StatusNotifierWatcher is available on the session bus.
 /// Returns `true` if `org.kde.StatusNotifierWatcher` is registered.
 pub fn is_sni_watcher_available() -> bool {

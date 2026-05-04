@@ -184,7 +184,18 @@ pub fn run() {
 
             let menu = Menu::with_items(&handle, &[&snap_i, &snap_full_i, &snap_win_i, &video_screen_i, &video_region_i, &video_window_i, &settings_i, &quit_i])?;
 
-            let tray_icon_bytes = include_bytes!("../icons/tray-icon.png");
+            // On Linux pick the white icon variant under dark theme (Yaru-dark, Adwaita dark, etc.)
+            // so the icon is visible against the dark panel. On macOS/Windows always use the
+            // black template — macOS converts it via icon_as_template, Windows handles it natively.
+            #[cfg(target_os = "linux")]
+            let tray_icon_bytes: &[u8] = if linux_env::is_dark_theme() {
+                include_bytes!("../icons/tray-icon-light.png")
+            } else {
+                include_bytes!("../icons/tray-icon.png")
+            };
+            #[cfg(not(target_os = "linux"))]
+            let tray_icon_bytes: &[u8] = include_bytes!("../icons/tray-icon.png");
+
             let tray_icon = tauri::image::Image::from_bytes(tray_icon_bytes)
                 .expect("failed to load tray icon");
 
