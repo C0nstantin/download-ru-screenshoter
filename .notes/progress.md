@@ -104,3 +104,16 @@
 - Подключён в `lib.rs` за `#[cfg(target_os = "linux")]`.
 - `cargo check` — зелёный. No new deps. No `unsafe`.
 
+## Подзадача 5c — интеграция ScreenCast + ffmpeg в commands/recording.rs
+
+**Status**: done (`cargo check` зелёный).
+
+**What was done**:
+- `state.rs`: добавлено поле `linux_screencast_session: Mutex<Option<ScreencastSession>>` за `#[cfg(target_os = "linux")]` с инициализацией `Mutex::new(None)`.
+- `commands/recording.rs`:
+  - Linux-ветка `start_video_capture` заменена с заглушки на реальный код: открытие `ScreencastSession::start()` через `block_on`, `start_ffmpeg_recording`, сохранение PID/path/session в state, переключение tray.
+  - Добавлен хелпер `make_output_path_linux()`.
+  - В `stop_recording_internal` добавлен Linux-блок: закрытие portal session через `session.close()` и сброс tray в normal mode.
+- Region/window video на Linux оставлены как `Err` (по плану — подзадача 5d).
+- `ScreencastSession` автоматически `Send` (все поля: `Screencast`, `Session`, `OwnedFd`, `u32` — `Send`), проверено `cargo check`.
+

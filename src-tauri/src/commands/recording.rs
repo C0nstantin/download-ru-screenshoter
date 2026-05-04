@@ -172,6 +172,15 @@ fn make_output_path() -> String {
     format!("/tmp/recording_{}.mov", uuid::Uuid::new_v4())
 }
 
+#[cfg(target_os = "linux")]
+fn make_output_path_linux() -> String {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("/tmp/recording_{ts}.mp4")
+}
+
 /// Start full-screen video capture using native macOS UI (screencapture -v).
 /// Opens the same picker as Cmd+Shift+5 — user selects area/window/screen.
 /// -g captures audio from the default input (microphone).
@@ -196,8 +205,37 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
 
     #[cfg(target_os = "linux")]
     {
-        let _ = (app, state);
-        Err("Video recording not yet implemented on Linux. See VIDEO_RECORDING.md".into())
+        let output_path = make_output_path_linux();
+
+        let session = tauri::async_runtime::block_on(
+            crate::screencast_portal::ScreencastSession::start()
+        ).map_err(|e| format!("ScreenCast portal failed: {e}"))?;
+
+        let node_id = session.stream_node_id;
+
+        let child = crate::screencast_record::start_ffmpeg_recording(
+            node_id,
+            std::path::Path::new(&output_path),
+        )?;
+        let pid = child.id();
+        drop(child);
+
+        {
+            let mut p = state.recording_pid.lock().unwrap();
+            *p = Some(pid);
+        }
+        {
+            let mut p = state.recording_path.lock().unwrap();
+            *p = Some(output_path.clone());
+        }
+        {
+            let mut s = state.linux_screencast_session.lock().unwrap();
+            *s = Some(session);
+        }
+
+        set_tray_recording_mode(&app, true);
+
+        return Ok(());
     }
 }
 
@@ -405,6 +443,16 @@ pub fn stop_recording_internal(app: &AppHandle) -> Result<String, String> {
                 .args(["-2", &pid.to_string()])
                 .status();
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let mut session_guard = state.linux_screencast_session.lock().unwrap();
+        if let Some(session) = session_guard.take() {
+            let _ = tauri::async_runtime::block_on(session.close());
+            tracing::info!("Linux ScreenCast portal session closed");
+        }
+        set_tray_recording_mode(app, false);
     }
 
     // Save as last_recording_path

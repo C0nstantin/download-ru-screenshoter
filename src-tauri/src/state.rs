@@ -15,6 +15,8 @@ pub struct AppState {
     pub locale: Mutex<String>,
     /// Flag to signal Windows recording to stop
     pub recording_stop_flag: Arc<AtomicBool>,
+    #[cfg(target_os = "linux")]
+    pub linux_screencast_session: std::sync::Mutex<Option<crate::screencast_portal::ScreencastSession>>,
 }
 
 impl Default for AppState {
@@ -30,6 +32,8 @@ impl Default for AppState {
             saved_input_volume: Mutex::new(None),
             locale: Mutex::new("ru".to_string()),
             recording_stop_flag: Arc::new(AtomicBool::new(false)),
+            #[cfg(target_os = "linux")]
+            linux_screencast_session: std::sync::Mutex::new(None),
         }
     }
 }
