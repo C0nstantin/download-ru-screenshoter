@@ -58,12 +58,13 @@ pub struct DisplayDiag {
 
 #[cfg(target_os = "linux")]
 fn parse_extensions_list(output: &str) -> Vec<String> {
+    // gsettings format: [ '...', '...' ] or @as [] for empty
     let trimmed = output.trim();
-    let trimmed = trimmed.strip_prefix('\'').unwrap_or(trimmed);
-    let trimmed = trimmed.strip_suffix('\'').unwrap_or(trimmed);
+    let trimmed = trimmed.strip_prefix('[').unwrap_or(trimmed);
+    let trimmed = trimmed.strip_suffix(']').unwrap_or(trimmed);
     let trimmed = trimmed.trim();
 
-    if trimmed == "@as []" || trimmed.is_empty() {
+    if trimmed.is_empty() || trimmed == "@as" {
         return Vec::new();
     }
 
