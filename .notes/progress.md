@@ -49,3 +49,17 @@
 - В `setup` блоке после создания tray добавлена Linux-логика: если SNI watcher недоступен — показываем главное окно и отправляем notification; если доступен — tray-only режим.
 - `cargo check` — зелёный. Clippy: 0 новых ошибок (все ошибки pre-existing).
 
+## 2026-05-04 — Wayland screenshot portal (подзадача 4a)
+
+**Status**: done (compiles, not yet integrated).
+
+**What was done**:
+- `ashpd = "0.13"` добавлен в `[target.'cfg(target_os = "linux")'.dependencies]` с features `["screenshot"]` (ver. 0.13.10 — latest stable).
+- Создан `src-tauri/src/screen_capture_portal.rs` с `capture_via_portal()` — async функция, вызывает `Screenshot::request().interactive(true).modal(true).send()`, парсит `file://` URI в путь, читает PNG-байты.
+- Модуль подключен в `lib.rs` за `#[cfg(target_os = "linux")]`.
+- `cargo check` — зелёный (новые crate-deps скомпилировались на cold cache).
+
+**Known minor issues** (TODO):
+- `percent_decode_str` дублирует существующий `percent_decode` в `lib.rs` (там приватный). При интеграции в 4b — экспортировать общий helper в утилитный модуль.
+- Функция `capture_via_portal()` пока никем не вызывается (по плану 4b).
+
