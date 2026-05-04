@@ -63,3 +63,7 @@
 - `percent_decode_str` дублирует существующий `percent_decode` в `lib.rs` (там приватный). При интеграции в 4b — экспортировать общий helper в утилитный модуль.
 - Функция `capture_via_portal()` пока никем не вызывается (по плану 4b).
 
+## Подзадача 4b — интеграция Wayland portal в capture_fullscreen
+
+**Status**: done — Wayland ветка (XDG_SESSION_TYPE == "wayland") добавлена в начало `capture_fullscreen` в `screenshot.rs`. На Linux+Wayland вызывает `capture_via_portal()`, на X11/macOS/Windows — существующий код без изменений. `cargo check` зелёный.
+

@@ -61,6 +61,32 @@ pub fn get_displays() -> Result<Vec<DisplayInfo>, String> {
 pub async fn capture_fullscreen(
     app: AppHandle,
 ) -> Result<ScreenshotData, String> {
+    // Linux + Wayland: use XDG portal instead of X11-only screenshots crate
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland") {
+            tracing::info!("capture_fullscreen: using Wayland portal backend");
+            let png_bytes = crate::screen_capture_portal::capture_via_portal().await?;
+            let img = screenshots::image::load_from_memory(&png_bytes)
+                .map_err(|e| format!("Failed to decode portal PNG: {e}"))?;
+            let (width, height) = (img.width(), img.height());
+
+            let state = app.state::<AppState>();
+            {
+                let mut current = state.current_screenshot.lock().unwrap();
+                *current = Some(png_bytes.clone());
+            }
+            {
+                let mut dims = state.screenshot_dimensions.lock().unwrap();
+                *dims = Some((width, height));
+            }
+
+            let base64_str = BASE64.encode(&png_bytes);
+            return Ok(ScreenshotData { base64: base64_str, width, height });
+        }
+    }
+
+    // Existing X11 / macOS / Windows path — DO NOT TOUCH.
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
 
     let screen = screens.first().ok_or("No screens found")?;
