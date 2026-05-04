@@ -16,6 +16,9 @@ mod screencast_portal;
 #[cfg(target_os = "linux")]
 mod screencast_record;
 
+#[cfg(target_os = "linux")]
+mod global_shortcuts_portal;
+
 use std::io::{Read, Seek, SeekFrom};
 use tauri::{AppHandle, Manager};
 use tauri::menu::{Menu, MenuItem};
@@ -254,6 +257,28 @@ pub fn run() {
                 } else {
                     tracing::info!("SNI watcher available — running in tray-only mode");
                 }
+
+                // Initialize GlobalShortcuts portal for native shortcut registration
+                let gs_handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    match crate::global_shortcuts_portal::GlobalShortcutsSession::start(
+                        gs_handle.clone(),
+                    )
+                    .await
+                    {
+                        Ok(session) => {
+                            let state = gs_handle.state::<AppState>();
+                            *state.linux_global_shortcuts_session.lock().unwrap() = Some(session);
+                            tracing::info!("GlobalShortcuts portal initialized");
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Failed to initialize GlobalShortcuts portal"
+                            );
+                        }
+                    }
+                });
             }
 
             // Initialize API base URL from env var or stored preference

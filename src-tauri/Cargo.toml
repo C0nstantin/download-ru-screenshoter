@@ -67,7 +67,8 @@ objc = "0.2"
 cocoa = "0.26"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13", default-features = true, features = ["screenshot", "screencast"] }
+ashpd = { version = "0.13", default-features = true, features = ["screenshot", "screencast", "global_shortcuts"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [features]
 dev_mode = []

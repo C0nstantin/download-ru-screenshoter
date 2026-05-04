@@ -17,6 +17,9 @@ pub struct AppState {
     pub recording_stop_flag: Arc<AtomicBool>,
     #[cfg(target_os = "linux")]
     pub linux_screencast_session: std::sync::Mutex<Option<crate::screencast_portal::ScreencastSession>>,
+    #[cfg(target_os = "linux")]
+    pub linux_global_shortcuts_session:
+        std::sync::Mutex<Option<crate::global_shortcuts_portal::GlobalShortcutsSession>>,
 }
 
 impl Default for AppState {
@@ -34,6 +37,8 @@ impl Default for AppState {
             recording_stop_flag: Arc::new(AtomicBool::new(false)),
             #[cfg(target_os = "linux")]
             linux_screencast_session: std::sync::Mutex::new(None),
+            #[cfg(target_os = "linux")]
+            linux_global_shortcuts_session: std::sync::Mutex::new(None),
         }
     }
 }
