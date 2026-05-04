@@ -341,7 +341,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn percent_decode(s: &str) -> String {
+pub fn percent_decode(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.bytes();
     while let Some(b) = chars.next() {

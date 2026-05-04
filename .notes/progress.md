@@ -67,3 +67,10 @@
 
 **Status**: done — Wayland ветка (XDG_SESSION_TYPE == "wayland") добавлена в начало `capture_fullscreen` в `screenshot.rs`. На Linux+Wayland вызывает `capture_via_portal()`, на X11/macOS/Windows — существующий код без изменений. `cargo check` зелёный.
 
+## Подзадача 7 — cleanup: убрать дубликат percent_decode
+
+**Status**: done.
+- `lib.rs:344`: `fn percent_decode` → `pub fn percent_decode` (экспортирована из crate).
+- `screen_capture_portal.rs`: удалена локальная `percent_decode_str` (-16 строк), вызов заменён на `crate::percent_decode`.
+- `cargo check` — зелёный, 0 новых предупреждений.
+

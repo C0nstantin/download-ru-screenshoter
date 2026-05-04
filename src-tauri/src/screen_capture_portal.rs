@@ -17,26 +17,8 @@ fn uri_to_path(uri: &ashpd::Uri) -> Result<PathBuf, String> {
     let path_str = s
         .strip_prefix("file://")
         .ok_or_else(|| format!("portal returned non-file URI: {s}"))?;
-    let decoded = percent_decode_str(path_str);
+    let decoded = crate::percent_decode(path_str);
     Ok(PathBuf::from(decoded))
-}
-
-/// Simple percent-decoding for `file://` URI paths.
-fn percent_decode_str(s: &str) -> String {
-    let mut result = String::new();
-    let mut chars = s.bytes();
-    while let Some(b) = chars.next() {
-        if b == b'%' {
-            let h1 = chars.next().unwrap_or(b'0') as char;
-            let h2 = chars.next().unwrap_or(b'0') as char;
-            if let Ok(byte) = u8::from_str_radix(&format!("{h1}{h2}"), 16) {
-                result.push(byte as char);
-            }
-        } else {
-            result.push(b as char);
-        }
-    }
-    result
 }
 
 /// Capture the screen interactively via the XDG portal.
