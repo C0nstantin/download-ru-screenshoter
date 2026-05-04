@@ -213,13 +213,13 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
 
         let node_id = session.stream_node_id;
 
-        let child = crate::screencast_record::start_ffmpeg_recording(
+        let mut child = crate::screencast_record::start_ffmpeg_recording(
             node_id,
             std::path::Path::new(&output_path),
         )?;
         let pid = child.id();
-        drop(child);
 
+        // Save pid/path/session BEFORE spawning monitor thread
         {
             let mut p = state.recording_pid.lock().unwrap();
             *p = Some(pid);
@@ -234,6 +234,47 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
         }
 
         set_tray_recording_mode(&app, true);
+
+        // Monitor-thread: wait on child, then cleanup state.
+        // Triggers on either: stop_recording_internal sent SIGINT → ffmpeg exits;
+        // OR portal Stop button closed the stream → ffmpeg exits;
+        // OR ffmpeg crashed.
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            let exit_status = child.wait();
+            tracing::info!(?exit_status, "ffmpeg exited, cleaning up");
+
+            let state = app_handle.state::<AppState>();
+
+            // 1. Save last_recording_path so frontend can find the file
+            let path = {
+                let mut p = state.recording_path.lock().unwrap();
+                p.take()
+            };
+            if let Some(path) = path {
+                let mut last = state.last_recording_path.lock().unwrap();
+                *last = Some(path);
+            }
+
+            // 2. Clear recording_pid
+            {
+                let mut p = state.recording_pid.lock().unwrap();
+                *p = None;
+            }
+
+            // 3. Close portal session (idempotent — None if already closed by stop_recording_internal)
+            let session = {
+                let mut s = state.linux_screencast_session.lock().unwrap();
+                s.take()
+            };
+            if let Some(session) = session {
+                let _ = tauri::async_runtime::block_on(session.close());
+                tracing::info!("Linux ScreenCast portal session closed by monitor-thread");
+            }
+
+            // 4. Reset tray to normal mode
+            set_tray_recording_mode(&app_handle, false);
+        });
 
         return Ok(());
     }
@@ -447,12 +488,9 @@ pub fn stop_recording_internal(app: &AppHandle) -> Result<String, String> {
 
     #[cfg(target_os = "linux")]
     {
-        let mut session_guard = state.linux_screencast_session.lock().unwrap();
-        if let Some(session) = session_guard.take() {
-            let _ = tauri::async_runtime::block_on(session.close());
-            tracing::info!("Linux ScreenCast portal session closed");
-        }
-        set_tray_recording_mode(app, false);
+        // Monitor-thread (in start_video_capture) will close the session
+        // and reset tray once ffmpeg actually exits after our SIGINT.
+        tracing::info!("Linux: stop signal sent, monitor-thread will finalize cleanup");
     }
 
     // Save as last_recording_path

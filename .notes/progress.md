@@ -132,3 +132,17 @@
 - Region/window video на Linux оставлены как `Err` (по плану — подзадача 5d).
 - `ScreencastSession` автоматически `Send` (все поля: `Screencast`, `Session`, `OwnedFd`, `u32` — `Send`), проверено `cargo check`.
 
+## Подзадача: monitor-thread для ffmpeg exit на Linux
+
+**Status**: done.
+
+**What was done**:
+- `src-tauri/src/commands/recording.rs` — Linux-ветка `start_video_capture`:
+  - `drop(child)` заменён на `std::thread::spawn` monitor-thread.
+  - Monitor-thread ждёт `child.wait()`, затем сохраняет `last_recording_path` из `recording_path.take()`, чистит `recording_pid`, закрывает portal session (через `s.take()` — idempotent), переключает tray в normal mode.
+  - PID/path/session сохраняются в state ДО спавна thread'а (нет race).
+- `stop_recording_internal` Linux-блок:
+  - Убран вызов `session.close()` и `set_tray_recording_mode(app, false)`.
+  - Вместо этого — `tracing::info!` о том, что cleanup сделает monitor-thread.
+- `cargo check` — зелёный (0 новых warnings, только pre-existing).
+
