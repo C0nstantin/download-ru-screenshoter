@@ -28,7 +28,15 @@ type DiagnosticReport = {
   screenshot_portal_available?: boolean | null;
   screencast_portal_available?: boolean | null;
   global_shortcuts_portal_available?: boolean | null;
+  plasma_version?: string | null;
 };
+
+function deFamily(de: string | null | undefined): "gnome" | "kde" | "other" {
+  const s = (de || "").toLowerCase();
+  if (s.includes("kde") || s.includes("plasma")) return "kde";
+  if (s.includes("gnome") || s.includes("unity") || s.includes("cinnamon") || s.includes("mate") || s.includes("pantheon")) return "gnome";
+  return "other";
+}
 
 function MainPage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -279,70 +287,87 @@ function MainPage() {
         </button>
       </section>
 
-      {report?.os.startsWith("linux") && report && (
-        <section className="section" style={{ borderTop: "1px solid #eee", marginTop: 12, paddingTop: 12 }}>
-          <h2>{t("main.linuxHealth")}</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14 }}>
-            <div style={{ color: "#666" }}>
-              {report.gnome_shell_version
-                ? t("main.gnomeShellVersion", { version: report.gnome_shell_version })
-                : t("main.gnomeShellUnknown")}
-            </div>
-            <div>
-              {report.has_ayatana_appindicator ? (
-                <span style={{ color: "#2a2" }}>✅ {t("main.appindicatorOk")}</span>
-              ) : (
-                <span>
-                  ❌ <span style={{ color: "#c00" }}>{t("main.appindicatorMissing")}</span>
-                  <br />
-                  <code style={{ color: "#c00", fontSize: 12 }}>{t("main.appindicatorMissingHint")}</code>
-                </span>
+      {report?.os.startsWith("linux") && report && (() => {
+        const family = deFamily(report.desktop_env);
+        return (
+          <section className="section" style={{ borderTop: "1px solid #eee", marginTop: 12, paddingTop: 12 }}>
+            <h2>{t("main.linuxHealth")}</h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14 }}>
+              {family === "gnome" && (
+                <div style={{ color: "#666" }}>
+                  {report.gnome_shell_version
+                    ? t("main.gnomeShellVersion", { version: report.gnome_shell_version })
+                    : t("main.gnomeShellUnknown")}
+                </div>
               )}
-            </div>
-            <div>
-              {report.appindicator_extension_enabled ? (
-                <span style={{ color: "#2a2" }}>✅ {t("main.trayExtOk")}</span>
-              ) : (
-                <span>
-                  ❌ <span style={{ color: "#c00" }}>{t("main.trayExtMissing")}</span>
-                  <br />
-                  <code style={{ color: "#c00", fontSize: 12 }}>{t("main.trayExtHint")}</code>
-                </span>
+              {family === "kde" && (
+                <div style={{ color: "#666" }}>
+                  {report.plasma_version
+                    ? t("main.plasmaVersion", { version: report.plasma_version })
+                    : t("main.plasmaVersionUnknown")}
+                </div>
               )}
-            </div>
-            {report.gnome_extensions && report.gnome_extensions.length > 0 && (
-              <div style={{ color: "#666" }}>
-                {t("main.extensionsCount", { count: String(report.gnome_extensions.length) })}
+              <div>
+                {report.has_ayatana_appindicator ? (
+                  <span style={{ color: "#2a2" }}>✅ {t("main.appindicatorOk")}</span>
+                ) : (
+                  <span>
+                    ❌ <span style={{ color: "#c00" }}>{t("main.appindicatorMissing")}</span>
+                    <br />
+                    <code style={{ color: "#c00", fontSize: 12 }}>{t("main.appindicatorMissingHint")}</code>
+                  </span>
+                )}
               </div>
-            )}
-            <div>
-              {report.screenshot_portal_available ? (
-                <span style={{ color: "#2a2" }}>✅ {t("main.screenshotPortalOk")}</span>
-              ) : (
-                <span style={{ color: "#c00" }}>❌ {t("main.screenshotPortalMissing")}</span>
+              {family === "gnome" && (
+                <div>
+                  {report.appindicator_extension_enabled ? (
+                    <span style={{ color: "#2a2" }}>✅ {t("main.trayExtOk")}</span>
+                  ) : (
+                    <span>
+                      ❌ <span style={{ color: "#c00" }}>{t("main.trayExtMissing")}</span>
+                      <br />
+                      <code style={{ color: "#c00", fontSize: 12 }}>{t("main.trayExtHint")}</code>
+                    </span>
+                  )}
+                </div>
               )}
-            </div>
-            <div>
-              {report.screencast_portal_available ? (
-                <span style={{ color: "#2a2" }}>✅ {t("main.screencastPortalOk")}</span>
-              ) : (
-                <span style={{ color: "#c00" }}>❌ {t("main.screencastPortalMissing")}</span>
+              {family === "kde" && (
+                <div style={{ color: "#2a2" }}>✅ {t("main.kdeNativeTray")}</div>
               )}
-            </div>
-            <div>
-              {report.global_shortcuts_portal_available ? (
-                <span style={{ color: "#2a2" }}>✅ {t("main.globalShortcutsOk")}</span>
-              ) : (
-                <span>
-                  ❌ <span style={{ color: "#c00" }}>{t("main.globalShortcutsMissing")}</span>
-                  <br />
-                  <code style={{ color: "#c00", fontSize: 12 }}>{t("main.globalShortcutsHint")}</code>
-                </span>
+              {family === "gnome" && report.gnome_extensions && report.gnome_extensions.length > 0 && (
+                <div style={{ color: "#666" }}>
+                  {t("main.extensionsCount", { count: String(report.gnome_extensions.length) })}
+                </div>
               )}
+              <div>
+                {report.screenshot_portal_available ? (
+                  <span style={{ color: "#2a2" }}>✅ {t("main.screenshotPortalOk")}</span>
+                ) : (
+                  <span style={{ color: "#c00" }}>❌ {t("main.screenshotPortalMissing")}</span>
+                )}
+              </div>
+              <div>
+                {report.screencast_portal_available ? (
+                  <span style={{ color: "#2a2" }}>✅ {t("main.screencastPortalOk")}</span>
+                ) : (
+                  <span style={{ color: "#c00" }}>❌ {t("main.screencastPortalMissing")}</span>
+                )}
+              </div>
+              <div>
+                {report.global_shortcuts_portal_available ? (
+                  <span style={{ color: "#2a2" }}>✅ {t("main.globalShortcutsOk")}</span>
+                ) : (
+                  <span>
+                    ❌ <span style={{ color: "#c00" }}>{t("main.globalShortcutsMissing")}</span>
+                    <br />
+                    <code style={{ color: "#c00", fontSize: 12 }}>{t("main.globalShortcutsHint")}</code>
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        </section>
-      )}
+          </section>
+        );
+      })()}
     </main>
   );
 }

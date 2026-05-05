@@ -27,6 +27,8 @@ pub struct DiagnosticReport {
     #[cfg(target_os = "linux")]
     pub gnome_shell_version: Option<String>,
     #[cfg(target_os = "linux")]
+    pub plasma_version: Option<String>,
+    #[cfg(target_os = "linux")]
     pub has_ayatana_appindicator: Option<bool>,
     #[cfg(target_os = "linux")]
     pub gnome_extensions: Option<Vec<String>>,
@@ -106,11 +108,29 @@ pub fn run_diagnostics(app: AppHandle) -> DiagnosticReport {
         .unwrap_or_else(|_| "unknown".to_string());
 
     #[cfg(target_os = "linux")]
-    let gnome_shell_version = Command::new("gnome-shell")
-        .arg("--version")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok());
+    let is_gnome = crate::linux_env::is_gnome_like();
+    #[cfg(target_os = "linux")]
+    let is_kde = crate::linux_env::is_kde_like();
+
+    #[cfg(target_os = "linux")]
+    let gnome_shell_version = if is_gnome {
+        Command::new("gnome-shell")
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    } else {
+        None
+    };
+
+    #[cfg(target_os = "linux")]
+    let plasma_version = if is_kde {
+        crate::linux_env::plasma_version()
+    } else {
+        None
+    };
 
     #[cfg(target_os = "linux")]
     let has_ayatana_appindicator = match Command::new("sh")
@@ -132,7 +152,7 @@ pub fn run_diagnostics(app: AppHandle) -> DiagnosticReport {
     let global_shortcuts_portal_available = crate::linux_env::is_global_shortcuts_portal_available();
 
     #[cfg(target_os = "linux")]
-    let (gnome_extensions, appindicator_extension_enabled) = {
+    let (gnome_extensions, appindicator_extension_enabled) = if is_gnome {
         let output = Command::new("gsettings")
             .args(["get", "org.gnome.shell", "enabled-extensions"])
             .output();
@@ -156,6 +176,8 @@ pub fn run_diagnostics(app: AppHandle) -> DiagnosticReport {
                 (None, None)
             }
         }
+    } else {
+        (None, None)
     };
 
     DiagnosticReport {
@@ -166,6 +188,8 @@ pub fn run_diagnostics(app: AppHandle) -> DiagnosticReport {
         session_type: std::env::var("XDG_SESSION_TYPE").ok(),
         #[cfg(target_os = "linux")]
         gnome_shell_version,
+        #[cfg(target_os = "linux")]
+        plasma_version,
         #[cfg(target_os = "linux")]
         has_ayatana_appindicator,
         #[cfg(target_os = "linux")]
