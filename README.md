@@ -138,7 +138,7 @@ sudo usermod -aG render $USER
 # перелогиниться
 ```
 
-**Системные зависимости** (Ubuntu/Debian):
+**ВАЖНО: Для работы в трее на Linux (включая GNOME 4) обязательна установка `libayatana-appindicator3-dev`**:
 
 ```bash
 sudo apt install -y \
@@ -151,6 +151,11 @@ sudo apt install -y \
   libx11-dev \
   xdotool
 ```
+
+Если приложение не отображается в трее в GNOME 4, убедитесь что установлены:
+- `libayatana-appindicator3-dev` — для StatusNotifierItem (SNI) поддержки
+- `gnome-shell-extensions` — для расширений GNOME
+- Установлено расширение [Tray Icons (Undocumented)](https://extensions.gnome.org/extension/2890/tray-icons-undocumented/) или подобное
 
 Fedora/RHEL:
 
@@ -244,6 +249,29 @@ src-tauri/src/                # Rust бэкенд
 
 - [ ] **Запись видео (Linux/Windows)** — реализовать через ffmpeg
 - [ ] **Мульти-монитор (Linux/Windows)** — отдельный overlay на каждый монитор
+
+---
+
+## Troubleshooting
+
+### Приложение не отображается в трее на Linux (GNOME 4)
+
+**Проблема**: В GNOME 4 и некоторых других дистрибутивах классический system tray отключен.
+
+**Решение**:
+
+1. Убедитесь что установлена зависимость:
+   ```bash
+   sudo apt install libayatana-appindicator3-dev
+   ```
+
+2. Установите расширение GNOME для отображения tray иконок:
+   - [Tray Icons (Undocumented)](https://extensions.gnome.org/extension/2890/tray-icons-undocumented/)
+   - [System Tray - SNI Support](https://extensions.gnome.org/extension/2087/system-tray-sni-support/)
+
+3. Перезапустите GNOME Shell: `Alt+F2`, введите `r`, нажмите `Enter`
+
+4. Перезапустите приложение
 
 ---
 
