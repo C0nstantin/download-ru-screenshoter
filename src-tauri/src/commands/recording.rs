@@ -207,77 +207,110 @@ pub fn start_video_capture(app: AppHandle, state: State<'_, AppState>) -> Result
     {
         let output_path = make_output_path_linux();
 
+        if crate::linux_env::is_x11_session() {
+            // X11: use x11grab over the whole virtual screen (covers all monitors).
+            let (sw, sh) = primary_screen_size_linux();
+            let child = crate::screencast_record::start_x11grab_recording(
+                0, 0, sw, sh,
+                std::path::Path::new(&output_path),
+            )?;
+            register_linux_recording(&app, &state, child.id(), &output_path);
+            spawn_linux_ffmpeg_monitor(app.clone(), child, output_path);
+            return Ok(());
+        }
+
+        // Wayland: use ScreenCast portal + pipewire.
         let session = tauri::async_runtime::block_on(
             crate::screencast_portal::ScreencastSession::start()
         ).map_err(|e| format!("ScreenCast portal failed: {e}"))?;
 
         let node_id = session.stream_node_id;
 
-        let mut child = crate::screencast_record::start_ffmpeg_recording(
+        let child = crate::screencast_record::start_ffmpeg_recording(
             node_id,
             std::path::Path::new(&output_path),
         )?;
-        let pid = child.id();
-
-        // Save pid/path/session BEFORE spawning monitor thread
-        {
-            let mut p = state.recording_pid.lock().unwrap();
-            *p = Some(pid);
-        }
-        {
-            let mut p = state.recording_path.lock().unwrap();
-            *p = Some(output_path.clone());
-        }
+        register_linux_recording(&app, &state, child.id(), &output_path);
         {
             let mut s = state.linux_screencast_session.lock().unwrap();
             *s = Some(session);
         }
-
-        set_tray_recording_mode(&app, true);
-
-        // Monitor-thread: wait on child, then cleanup state.
-        // Triggers on either: stop_recording_internal sent SIGINT → ffmpeg exits;
-        // OR portal Stop button closed the stream → ffmpeg exits;
-        // OR ffmpeg crashed.
-        let app_handle = app.clone();
-        std::thread::spawn(move || {
-            let exit_status = child.wait();
-            tracing::info!(?exit_status, "ffmpeg exited, cleaning up");
-
-            let state = app_handle.state::<AppState>();
-
-            // 1. Save last_recording_path so frontend can find the file
-            let path = {
-                let mut p = state.recording_path.lock().unwrap();
-                p.take()
-            };
-            if let Some(path) = path {
-                let mut last = state.last_recording_path.lock().unwrap();
-                *last = Some(path);
-            }
-
-            // 2. Clear recording_pid
-            {
-                let mut p = state.recording_pid.lock().unwrap();
-                *p = None;
-            }
-
-            // 3. Close portal session (idempotent — None if already closed by stop_recording_internal)
-            let session = {
-                let mut s = state.linux_screencast_session.lock().unwrap();
-                s.take()
-            };
-            if let Some(session) = session {
-                let _ = tauri::async_runtime::block_on(session.close());
-                tracing::info!("Linux ScreenCast portal session closed by monitor-thread");
-            }
-
-            // 4. Reset tray to normal mode
-            set_tray_recording_mode(&app_handle, false);
-        });
-
+        spawn_linux_ffmpeg_monitor(app.clone(), child, output_path);
         return Ok(());
     }
+}
+
+/// Return primary screen physical pixel size for x11grab fullscreen capture.
+/// Falls back to 1920x1080 if detection fails.
+#[cfg(target_os = "linux")]
+fn primary_screen_size_linux() -> (u32, u32) {
+    use screenshots::Screen;
+    if let Ok(screens) = Screen::all() {
+        if let Some(s) = screens.iter().find(|s| s.display_info.is_primary)
+            .or_else(|| screens.first())
+        {
+            return (s.display_info.width, s.display_info.height);
+        }
+    }
+    (1920, 1080)
+}
+
+/// Save pid + path in shared state and switch tray to "Stop" mode.
+#[cfg(target_os = "linux")]
+fn register_linux_recording(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    pid: u32,
+    output_path: &str,
+) {
+    {
+        let mut p = state.recording_pid.lock().unwrap();
+        *p = Some(pid);
+    }
+    {
+        let mut p = state.recording_path.lock().unwrap();
+        *p = Some(output_path.to_string());
+    }
+    set_tray_recording_mode(app, true);
+}
+
+/// Wait on the ffmpeg child in a background thread, then reset state, close any
+/// portal session, and open the video-result window if the file was produced.
+#[cfg(target_os = "linux")]
+fn spawn_linux_ffmpeg_monitor(
+    app: AppHandle,
+    mut child: std::process::Child,
+    output_path: String,
+) {
+    std::thread::spawn(move || {
+        let exit_status = child.wait();
+        tracing::info!(?exit_status, "ffmpeg exited, cleaning up");
+
+        let state = app.state::<AppState>();
+
+        { let mut p = state.recording_path.lock().unwrap(); *p = None; }
+        { let mut p = state.recording_pid.lock().unwrap(); *p = None; }
+
+        let session = { state.linux_screencast_session.lock().unwrap().take() };
+        if let Some(session) = session {
+            let _ = tauri::async_runtime::block_on(session.close());
+            tracing::info!("Linux ScreenCast portal session closed by monitor-thread");
+        }
+
+        set_tray_recording_mode(&app, false);
+
+        if std::fs::metadata(&output_path).is_ok() {
+            {
+                let mut l = state.last_recording_path.lock().unwrap();
+                *l = Some(output_path.clone());
+            }
+            let _ = open_video_result_window(&app, &output_path);
+        } else {
+            tracing::info!("Recording cancelled — no file created");
+            let mut l = state.last_recording_path.lock().unwrap();
+            *l = None;
+        }
+    });
 }
 
 /// Start region video recording via screencapture -v -R x,y,w,h.
@@ -323,8 +356,33 @@ pub fn start_video_recording(
 
     #[cfg(target_os = "linux")]
     {
-        let _ = (app, state, x, y, width, height);
-        Err("Region video recording not yet implemented on Linux. See VIDEO_RECORDING.md".into())
+        if !crate::linux_env::is_x11_session() {
+            let _ = (x, y, width, height);
+            // On Wayland, fall back to portal-based fullscreen recording —
+            // the portal does its own picker, region selection from our overlay
+            // can't be honored on a Wayland compositor without compositor-level cropping.
+            return start_video_capture(app, state);
+        }
+
+        let (offset_x, offset_y) = state.screen_offset.lock().unwrap().unwrap_or((0, 0));
+        let screen_x = x + offset_x;
+        let screen_y = y + offset_y;
+
+        let output_path = make_output_path_linux();
+        // Give the overlay window time to disappear before grabbing the screen.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        let child = crate::screencast_record::start_x11grab_recording(
+            screen_x,
+            screen_y,
+            width.max(0) as u32,
+            height.max(0) as u32,
+            std::path::Path::new(&output_path),
+        )?;
+
+        register_linux_recording(&app, &state, child.id(), &output_path);
+        spawn_linux_ffmpeg_monitor(app.clone(), child, output_path);
+        Ok(())
     }
 }
 
@@ -408,8 +466,94 @@ pub fn start_video_capture_window(app: AppHandle, state: State<'_, AppState>) ->
 
     #[cfg(target_os = "linux")]
     {
-        let _ = (app, state);
-        Err("Window video recording not yet implemented on Linux. See VIDEO_RECORDING.md".into())
+        if !crate::linux_env::is_x11_session() {
+            // Wayland doesn't let us pick an arbitrary window from outside the compositor.
+            // Fall back to portal which has its own window picker.
+            return start_video_capture(app, state);
+        }
+
+        // xdotool selectwindow blocks until the user clicks a window — run it on a
+        // worker thread so we don't pin the Tokio runtime, and so the tray menu stays responsive.
+        let app_clone = app.clone();
+        std::thread::spawn(move || {
+            let geom = match pick_x11_window_geometry() {
+                Ok(Some(g)) => g,
+                Ok(None) => {
+                    tracing::info!("window picker cancelled");
+                    return;
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "xdotool window picker failed");
+                    return;
+                }
+            };
+
+            let output_path = make_output_path_linux();
+            let child = match crate::screencast_record::start_x11grab_recording(
+                geom.x, geom.y, geom.w, geom.h,
+                std::path::Path::new(&output_path),
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!(error = %e, "x11grab failed for window recording");
+                    return;
+                }
+            };
+
+            let state = app_clone.state::<AppState>();
+            register_linux_recording(&app_clone, &state, child.id(), &output_path);
+            spawn_linux_ffmpeg_monitor(app_clone.clone(), child, output_path);
+        });
+        Ok(())
+    }
+}
+
+/// Geometry returned by xdotool, in screen pixels.
+#[cfg(target_os = "linux")]
+struct WindowGeom { x: i32, y: i32, w: u32, h: u32 }
+
+/// Use `xdotool selectwindow` so the user clicks a window, then read its geometry.
+/// Returns `Ok(None)` if the user cancelled (xdotool exited non-zero).
+#[cfg(target_os = "linux")]
+fn pick_x11_window_geometry() -> Result<Option<WindowGeom>, String> {
+    use std::process::Command;
+
+    let select = Command::new("xdotool")
+        .arg("selectwindow")
+        .output()
+        .map_err(|e| format!("xdotool not available (install with `sudo apt install xdotool`): {e}"))?;
+
+    if !select.status.success() {
+        return Ok(None);
+    }
+    let wid = String::from_utf8_lossy(&select.stdout).trim().to_string();
+    if wid.is_empty() {
+        return Ok(None);
+    }
+
+    let geom = Command::new("xdotool")
+        .args(["getwindowgeometry", "--shell", &wid])
+        .output()
+        .map_err(|e| format!("xdotool getwindowgeometry failed: {e}"))?;
+    if !geom.status.success() {
+        return Err(format!("xdotool getwindowgeometry exited {:?}", geom.status.code()));
+    }
+
+    let text = String::from_utf8_lossy(&geom.stdout);
+    let mut x: Option<i32> = None;
+    let mut y: Option<i32> = None;
+    let mut w: Option<u32> = None;
+    let mut h: Option<u32> = None;
+    for line in text.lines() {
+        if let Some(v) = line.strip_prefix("X=")      { x = v.trim().parse().ok(); }
+        else if let Some(v) = line.strip_prefix("Y=") { y = v.trim().parse().ok(); }
+        else if let Some(v) = line.strip_prefix("WIDTH=")  { w = v.trim().parse().ok(); }
+        else if let Some(v) = line.strip_prefix("HEIGHT=") { h = v.trim().parse().ok(); }
+    }
+
+    match (x, y, w, h) {
+        (Some(x), Some(y), Some(w), Some(h)) => Ok(Some(WindowGeom { x, y, w, h })),
+        _ => Err(format!("could not parse xdotool output: {text}")),
     }
 }
 
@@ -565,9 +709,12 @@ pub async fn convert_to_mp4(
     duration_sec: Option<f64>,
 ) -> Result<String, String> {
     validate_recording_path(&src_path)?;
-    let dst_path = src_path
-        .replace(".mov", "_converted.mp4")
-        .replace(".MOV", "_converted.mp4");
+    let dst_path = {
+        let src = std::path::Path::new(&src_path);
+        let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("recording");
+        let parent = src.parent().unwrap_or(std::path::Path::new("/tmp"));
+        parent.join(format!("{stem}_converted.mp4")).to_string_lossy().to_string()
+    };
 
     #[cfg(target_os = "macos")]
     {
@@ -618,7 +765,54 @@ pub async fn convert_to_mp4(
     }
 
     #[cfg(target_os = "linux")]
-    Err("Conversion not yet supported on this platform".into())
+    {
+        // Re-encode with libx264 + scale by preset; trim with -ss/-t.
+        let preset = preset.as_deref().unwrap_or("high");
+        let (scale_filter, crf): (Option<&str>, &str) = match preset {
+            "low"    => (Some("scale=-2:720"),  "28"),
+            "medium" => (Some("scale=-2:1080"), "23"),
+            _        => (None,                   "18"),
+        };
+
+        let mut args: Vec<String> = Vec::new();
+        if let Some(start) = start_sec.filter(|&s| s > 0.0) {
+            args.push("-ss".into());
+            args.push(format!("{start}"));
+        }
+        args.push("-i".into());
+        args.push(src_path.clone());
+        if let Some(dur) = duration_sec.filter(|&d| d > 0.0) {
+            args.push("-t".into());
+            args.push(format!("{dur}"));
+        }
+        if let Some(filter) = scale_filter {
+            args.push("-vf".into());
+            args.push(filter.into());
+        }
+        args.extend([
+            "-c:v".into(), "libx264".into(),
+            "-preset".into(), "veryfast".into(),
+            "-crf".into(), crf.into(),
+            "-pix_fmt".into(), "yuv420p".into(),
+            "-movflags".into(), "+faststart".into(),
+            "-an".into(),
+            "-y".into(),
+            dst_path.clone(),
+        ]);
+
+        let output = tokio::process::Command::new("ffmpeg")
+            .args(&args)
+            .output()
+            .await
+            .map_err(|e| format!("ffmpeg failed (is it installed? `sudo apt install ffmpeg`): {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let tail = stderr.lines().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+            return Err(format!("ffmpeg conversion failed: {tail}"));
+        }
+        Ok(dst_path)
+    }
 }
 
 /// Upload video file to download.ru
