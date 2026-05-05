@@ -72,8 +72,10 @@ pub fn run() {
         }))
         // Custom protocol to serve local video files with byte-range support
         .register_uri_scheme_protocol("localfile", |_app, req| {
+            let uri_str = req.uri().to_string();
             let path = req.uri().path().to_string();
             let decoded = percent_decode(&path);
+            tracing::info!(uri = %uri_str, raw_path = %path, decoded = %decoded, "localfile:// request");
             // On Windows, URI path starts with /C:/... — strip leading / before drive letter
             let file_path = if cfg!(target_os = "windows") && decoded.len() > 2 && decoded.as_bytes()[0] == b'/' && decoded.as_bytes()[2] == b':' {
                 decoded[1..].to_string()
@@ -107,7 +109,13 @@ pub fn run() {
                 )
                 && !file_path.contains("..");
             if !is_allowed {
-                tracing::warn!(path = %file_path, "localfile:// blocked path");
+                tracing::warn!(
+                    path = %file_path,
+                    filename,
+                    in_allowed_dir,
+                    parent = ?canonical.parent(),
+                    "localfile:// blocked path"
+                );
                 return tauri::http::Response::builder()
                     .status(403).body(vec![]).unwrap();
             }
@@ -118,14 +126,19 @@ pub fn run() {
 
             let mut file = match std::fs::File::open(&file_path) {
                 Ok(f) => f,
-                Err(_) => return tauri::http::Response::builder()
-                    .status(404).body(vec![]).unwrap(),
+                Err(e) => {
+                    tracing::warn!(path = %file_path, error = %e, "localfile:// open failed");
+                    return tauri::http::Response::builder()
+                        .status(404).body(vec![]).unwrap();
+                }
             };
             let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+            let range_hdr = req.headers().get("range")
+                .and_then(|v| v.to_str().ok().map(String::from));
+            tracing::info!(path = %file_path, file_size, range = ?range_hdr, mime, "localfile:// serving");
 
             // Handle Range header for video seeking
-            if let Some(range_val) = req.headers().get("range") {
-                let range_str = range_val.to_str().unwrap_or("bytes=0-");
+            if let Some(range_str) = range_hdr.as_deref() {
                 let (start, end) = parse_byte_range(range_str, file_size);
                 let length = end - start + 1;
                 // Cap single range response at 10MB to prevent OOM
@@ -134,7 +147,8 @@ pub fn run() {
                 let end = start + length - 1;
                 let mut buf = vec![0u8; length as usize];
                 let _ = file.seek(SeekFrom::Start(start));
-                let _ = file.read_exact(&mut buf);
+                let read_result = file.read_exact(&mut buf);
+                tracing::info!(start, end, length, read_ok = read_result.is_ok(), "localfile:// 206 response");
                 return tauri::http::Response::builder()
                     .status(206)
                     .header("Content-Range", format!("bytes {}-{}/{}", start, end, file_size))
@@ -145,7 +159,8 @@ pub fn run() {
             }
 
             let mut buf = Vec::new();
-            let _ = file.read_to_end(&mut buf);
+            let read_result = file.read_to_end(&mut buf);
+            tracing::info!(read_bytes = buf.len(), read_ok = read_result.is_ok(), "localfile:// 200 response");
             tauri::http::Response::builder()
                 .status(200)
                 .header("Content-Length", file_size.to_string())
