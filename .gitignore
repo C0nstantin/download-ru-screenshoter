@@ -26,3 +26,9 @@ dist-ssr
 *.mp4
 recording_*
 docs/
+
+# Build output
+target/
+
+# AI agent working notes
+.notes/
